@@ -1,154 +1,94 @@
 # GitHub 基础操作教程
 
-本教程适用于当前项目目录：
+本教程只讲当前项目最常用的 GitHub 操作。
+
+项目文件夹：
 
 `D:\kexiexitong`
 
-本项目已经有前端代码和项目文档，版本管理的目标是把这些文件安全保存到 Git，并同步到 GitHub，方便后续多人协作、回看历史、按分支推进不同任务。
+GitHub 仓库地址：
 
-## 1. 先理解三个概念
+`https://github.com/yingxiaoyang/kexie_Management-system.git`
 
-### 1.1 Git
+## 1. 先记住一句话
 
-Git 是本机的版本记录工具。它会记录每次改了哪些文件、为什么改、是谁改的。
+Git 是本机的保存历史。
 
-常用场景：
+GitHub 是网上的备份仓库。
 
-- 保存一个阶段成果
-- 回看历史改动
-- 对比两次修改
-- 建分支做不同任务
+GitHub Desktop 是图形界面工具，可以用按钮操作 Git 和 GitHub。
 
-### 1.2 GitHub
+## 2. main 分支是什么意思
 
-GitHub 是网上的代码仓库。可以把本机 Git 仓库同步上去，防止只存在本机，同时方便其他人查看和协作。
+`main` 是项目的主分支。
 
-### 1.3 本地仓库和远程仓库
+你可以把它理解成：
 
-- 本地仓库：`D:\kexiexitong` 里的 Git 仓库
-- 远程仓库：GitHub 网站上的仓库
-- `origin`：通常用来表示默认的 GitHub 远程仓库
-
-## 2. 每天常用流程
-
-### 2.1 查看当前状态
-
-```powershell
-git status
+```text
+项目的正式主线版本
 ```
 
-用途：
+它的作用是保存大家都认可的、比较稳定的成果。
 
-- 看哪些文件改了
-- 看哪些文件还没加入提交
-- 看当前在哪个分支
+比如：
 
-### 2.2 保存本次修改
+- 当前项目基础代码
+- 已确认的文档
+- 已完成并检查过的功能
 
-```powershell
-git add .
-git commit -m "说明这次做了什么"
+平时小任务可以先在其他分支做，确认没问题后再合并到 `main`。
+
+如果现在只有你一个人学习和维护项目，也可以先在 `main` 上提交。等项目变复杂、多人一起做时，再严格使用任务分支。
+
+## 3. 本地仓库和 GitHub 仓库
+
+当前有两个位置：
+
+```text
+D:\kexiexitong
 ```
 
-建议提交说明写清楚，例如：
-
-```powershell
-git commit -m "docs: add github workflow guide"
-```
-
-常见提交说明前缀：
-
-- `docs:` 文档
-- `setup:` 环境或配置
-- `feat:` 新功能
-- `fix:` 修复问题
-- `style:` 页面样式
-- `refactor:` 代码整理
-
-### 2.3 查看提交历史
-
-```powershell
-git log --oneline --graph --decorate --all
-```
-
-用途：
-
-- 看项目保存过哪些阶段成果
-- 看当前分支从哪里分出来
-- 查找某次提交编号
-
-### 2.4 同步到 GitHub
-
-第一次推送：
-
-```powershell
-git push -u origin main
-```
-
-之后推送：
-
-```powershell
-git push
-```
-
-### 2.5 从 GitHub 拉取别人更新
-
-```powershell
-git pull
-```
-
-建议每天开始改代码前先执行一次，避免基于旧代码继续修改。
-
-## 3. 第一次连接 GitHub
-
-当前项目远程仓库地址：
+这是你电脑上的本地仓库。
 
 ```text
 https://github.com/yingxiaoyang/kexie_Management-system.git
 ```
 
-### 3.1 在 GitHub 网站创建远程仓库
+这是 GitHub 网站上的远程仓库。
 
-1. 打开 GitHub。
-2. 点击右上角 `+`。
-3. 选择 `New repository`。
-4. 仓库名建议使用：`kexiexitong`。
-5. 可见性按需要选择 `Private` 或 `Public`。
-6. 不要勾选自动创建 README、`.gitignore` 或 License，因为本地项目已经准备好这些内容。
-7. 创建仓库。
+本地仓库负责记录你电脑上的修改。
 
-### 3.2 连接本地仓库和远程仓库
+远程仓库负责把修改同步到 GitHub，方便备份和协作。
 
-把下面命令里的用户名替换成自己的 GitHub 用户名：
+## 4. origin 是什么
 
-```powershell
-git remote add origin https://github.com/你的用户名/kexiexitong.git
-git push -u origin main
+`origin` 是远程仓库的默认名字。
+
+它不是一个新仓库，只是 Git 给这个 GitHub 地址取的简称。
+
+比如：
+
+```text
+origin = https://github.com/yingxiaoyang/kexie_Management-system.git
 ```
 
-如果已经添加过远程地址，但地址不对，可以修改：
+以后看到 `Push origin`，意思就是：
 
-```powershell
-git remote set-url origin https://github.com/你的用户名/kexiexitong.git
+```text
+把本地提交推送到这个 GitHub 仓库
 ```
 
-### 3.3 查看远程仓库地址
+看到 `Pull origin`，意思就是：
 
-```powershell
-git remote -v
+```text
+从这个 GitHub 仓库拉取最新内容到本机
 ```
 
-如果看到 `origin` 后面跟着 GitHub 地址，说明本地和 GitHub 已经连接。
+## 5. GitHub Desktop 应该怎么打开这个项目
 
-## 4. GitHub Desktop 怎么用
+当前项目已经在本机存在，所以不要重新 Clone 一份。
 
-GitHub Desktop 是 GitHub 官方桌面端。它不是必须安装，但对初学者很有用，因为可以少记一些命令，用按钮完成提交、推送、拉取、切换分支。
-
-当前项目已经在本机初始化为 Git 仓库，位置是：
-
-`D:\kexiexitong`
-
-所以第一次使用 GitHub Desktop 时，应选择：
+在 GitHub Desktop 中选择：
 
 ```text
 Add an Existing Repository from your local drive...
@@ -160,146 +100,126 @@ Add an Existing Repository from your local drive...
 D:\kexiexitong
 ```
 
-不要优先点击：
+不要优先点：
 
 ```text
 Clone yingxiaoyang/kexie_Management-system
 ```
 
-因为 Clone 会把 GitHub 上的仓库重新下载到另一个文件夹，容易和当前正在使用的 `D:\kexiexitong` 混在一起。
+因为 Clone 会重新下载一份项目，容易和现在的 `D:\kexiexitong` 混淆。
 
-### 4.1 GitHub Desktop 常用按钮
+## 6. GitHub Desktop 常用按钮
 
-#### Changes
+### Changes
 
-显示当前改了哪些文件。
+这里会显示你改了哪些文件。
 
-相当于命令：
+如果显示：
+
+```text
+0 changed files
+```
+
+说明现在没有未保存的修改。
+
+### Summary
+
+这里填写本次提交说明。
+
+比如：
+
+```text
+docs: update github guide
+```
+
+### Commit to main
+
+把这次修改保存到本机 Git 历史。
+
+注意：Commit 只是保存到本机，还没有上传到 GitHub。
+
+### Push origin
+
+把本机已经提交的内容上传到 GitHub。
+
+### Publish branch
+
+第一次把某个本地分支上传到 GitHub 时，会显示这个按钮。
+
+你现在看到的 `Publish branch`，意思是：
+
+```text
+main 分支已经在本机有内容，但还没有发布到 GitHub
+```
+
+可以点击它，把 `main` 分支上传到 GitHub。
+
+### Pull origin
+
+把 GitHub 上的新内容拉到本机。
+
+多人协作时，开始改文件前建议先点一次。
+
+## 7. 日常使用顺序
+
+最常用的顺序是：
+
+```text
+改文件
+看 Changes
+写 Summary
+点 Commit
+点 Push
+```
+
+也就是：
+
+1. 先修改项目文件。
+2. 回到 GitHub Desktop 看 `Changes`。
+3. 在 `Summary` 写一句这次做了什么。
+4. 点 `Commit to main`。
+5. 点 `Push origin` 或 `Publish branch`。
+
+## 8. 什么时候用命令
+
+如果你主要用 GitHub Desktop，可以先少用命令。
+
+下面这些命令只是帮助你理解按钮背后的意思：
 
 ```powershell
 git status
 ```
 
-#### Summary
-
-填写本次提交说明。
-
-建议写清楚做了什么，例如：
-
-```text
-docs: update github desktop guide
-```
-
-#### Commit to main
-
-把当前修改保存到本地 Git 历史。
-
-相当于命令：
+查看现在改了什么。
 
 ```powershell
 git add .
 git commit -m "提交说明"
 ```
 
-#### Push origin
-
-把本地提交同步到 GitHub。
-
-相当于命令：
+保存一次本地提交。
 
 ```powershell
 git push
 ```
 
-#### Fetch origin
-
-检查 GitHub 上有没有别人提交的新内容，但不会直接合并。
-
-#### Pull origin
-
-把 GitHub 上的新内容拉到本机。
-
-相当于命令：
+上传到 GitHub。
 
 ```powershell
 git pull
 ```
 
-### 4.2 GitHub Desktop 推荐日常流程
+从 GitHub 拉取最新内容。
 
-1. 打开 GitHub Desktop。
-2. 确认左上角仓库是 `kexie_Management-system` 或本地路径是 `D:\kexiexitong`。
-3. 开始改项目文件。
-4. 回到 GitHub Desktop，看 `Changes` 列表。
-5. 在 `Summary` 写提交说明。
-6. 点击 `Commit to main` 或 `Commit to 当前分支`。
-7. 点击 `Push origin` 同步到 GitHub。
+## 9. 不要提交哪些东西
 
-### 4.3 分支怎么在 GitHub Desktop 里用
+不要提交这些内容：
 
-顶部菜单选择：
+- `node_modules`
+- `dist`
+- `.env`
+- 上传文件
+- 临时文件
+- 密码、密钥、数据库账号
 
-```text
-Branch -> New Branch
-```
-
-新建分支时按项目规则命名，例如：
-
-```text
-setup/frontend-existing-cleanup
-feature/backend-data-model
-feature/submission-review
-```
-
-切换分支时，点击顶部当前分支名称，再选择目标分支。
-
-建议：
-
-- 文档和版本管理用 `setup/github-guide`。
-- 前端结构整理用 `setup/frontend-existing-cleanup`。
-- 后端数据模型用 `feature/backend-data-model`。
-- 不同任务不要混在同一个分支里做。
-
-## 5. 常见问题
-
-### 5.1 为什么不提交 node_modules
-
-`node_modules` 是前端依赖目录，文件很多，也可以通过 `package-lock.json` 重新安装。提交它会让仓库变得巨大，协作时也容易出问题。
-
-以后别人拿到项目后，在前端目录执行：
-
-```powershell
-npm.cmd install
-```
-
-就可以重新安装依赖。
-
-### 5.2 为什么不提交 dist
-
-`dist` 是构建结果，可以重新生成，不是源代码。通常提交源代码，不提交构建产物。
-
-### 5.3 忘记先 pull 就改代码怎么办
-
-先保存自己的修改：
-
-```powershell
-git add .
-git commit -m "保存当前修改"
-```
-
-再拉取远程更新：
-
-```powershell
-git pull
-```
-
-如果出现冲突，需要按 Git 提示处理冲突文件，再重新提交。
-
-## 6. 推荐习惯
-
-- 每完成一个小阶段就提交一次。
-- 提交说明写清楚，不写 `update`、`test` 这类看不出意义的描述。
-- 改代码前先看 `git status`。
-- 多人协作时，改代码前先 `git pull`。
-- 不把密码、数据库账号、密钥写进 Git。
-- 不把 `node_modules`、`dist`、上传文件、临时文件提交到 GitHub。
+这些已经写进 `.gitignore`，Git 会自动忽略大部分不该提交的文件。

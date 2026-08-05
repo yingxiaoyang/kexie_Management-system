@@ -1,154 +1,167 @@
 # Git 分支使用规则
 
-本项目采用“一个任务一个分支”的方式推进。这样可以让 Docker、前端、后端、业务功能、界面优化等任务互不覆盖。
+本项目现在先用简单规则。
 
-## 1. 主分支
+## 1. 分支是什么
 
-### main
+分支可以理解成：
 
-`main` 是稳定主分支。
+```text
+从项目主线复制出来的一条工作路线
+```
+
+你可以在分支上改东西，确认没问题后，再合并回主线。
+
+这样做的好处是：
+
+- 不同任务不会互相影响。
+- 出问题时更容易找原因。
+- 多个人可以同时做不同任务。
+
+## 2. main 分支
+
+`main` 是项目主分支。
+
+它代表：
+
+```text
+当前项目比较稳定、可以保留的版本
+```
 
 规则：
 
-- 只放已经确认可保留的成果。
-- 不直接在 `main` 上做大改动。
-- 每个任务分支完成后，再合并回 `main`。
+- 小改动、文档改动，可以先直接提交到 `main`。
+- 大功能、多人协作任务，建议新建任务分支。
+- 任务分支确认完成后，再合并回 `main`。
 
-## 2. 推荐任务分支
+## 3. 当前建议分支
 
-项目推进计划中建议使用以下分支：
+项目推进计划建议这些分支：
 
-- `setup/docker-mysql`
-- `setup/github-guide`
-- `setup/frontend-existing-cleanup`
-- `feature/backend-data-model`
-- `feature/submission-review`
-- `feature/archive-export`
-- `feature/portal-admin-ui`
+```text
+setup/docker-mysql
+setup/github-guide
+setup/frontend-existing-cleanup
+feature/backend-data-model
+feature/submission-review
+feature/archive-export
+feature/portal-admin-ui
+```
 
-当前对话负责：
+当前 GitHub 教程相关内容可以放在：
 
-- `setup/github-guide`
+```text
+setup/github-guide
+```
 
-## 3. 分支命名规则
+## 4. 分支名字怎么理解
 
-### 3.1 setup/
+### setup/
 
-用于环境、配置、教程类任务。
+表示环境、配置、教程类任务。
 
-示例：
+例如：
 
 ```text
 setup/github-guide
 setup/docker-mysql
-setup/frontend-existing-cleanup
 ```
 
-### 3.2 feature/
+### feature/
 
-用于具体业务功能。
+表示具体功能开发。
 
-示例：
+例如：
 
 ```text
 feature/backend-data-model
 feature/submission-review
-feature/archive-export
 ```
 
-### 3.3 fix/
+### fix/
 
-用于修复问题。
+表示修复问题。
 
-示例：
+例如：
 
 ```text
-fix/login-error
-fix/upload-validation
+fix/upload-error
 ```
 
-### 3.4 docs/
+## 5. GitHub Desktop 里怎么用分支
 
-用于纯文档调整。
+### 创建分支
 
-示例：
+点击顶部菜单：
 
 ```text
-docs/update-run-guide
+Branch -> New Branch
 ```
 
-## 4. 每个分支的工作流程
-
-### 4.1 从 main 创建任务分支
-
-```powershell
-git switch main
-git pull
-git switch -c setup/github-guide
-```
-
-### 4.2 在任务分支上修改并提交
-
-```powershell
-git status
-git add .
-git commit -m "docs: add github workflow guide"
-```
-
-### 4.3 推送任务分支到 GitHub
-
-```powershell
-git push -u origin setup/github-guide
-```
-
-### 4.4 合并回 main
-
-任务确认完成后：
-
-```powershell
-git switch main
-git pull
-git merge setup/github-guide
-git push
-```
-
-## 5. 多对话协作规则
-
-- 每个对话只在自己的分支内工作。
-- 不跨范围修改其他对话负责的核心文件。
-- 如果必须改公共文件，先写清楚原因和影响。
-- 合并前先确认本分支能正常运行或至少文档完整。
-- 每次对话完成后，在交接记录里写明改了什么、怎么验证、还缺什么。
-
-## 6. 冲突处理原则
-
-如果 Git 提示冲突：
-
-1. 先不要慌，也不要随便删除文件。
-2. 打开冲突文件，找到 Git 标记的冲突位置。
-3. 保留正确内容，删除冲突标记。
-4. 执行：
-
-```powershell
-git add 冲突文件路径
-git commit
-```
-
-冲突标记通常长这样：
+输入分支名，例如：
 
 ```text
-<<<<<<< HEAD
-当前分支内容
-=======
-另一边分支内容
->>>>>>> 分支名
+setup/frontend-existing-cleanup
 ```
 
-## 7. 当前项目建议
+### 切换分支
 
-- `main`：只放稳定成果。
-- `setup/github-guide`：保存 GitHub 教程、忽略规则、交接记录。
-- 前端页面结构调整交给 `setup/frontend-existing-cleanup`。
-- 后端和数据库模型交给 `feature/backend-data-model`。
-- 材料提交审核交给 `feature/submission-review`。
-- 归档导出交给 `feature/archive-export`。
+点击顶部的当前分支名称。
+
+比如现在显示：
+
+```text
+Current branch main
+```
+
+点它以后可以选择其他分支。
+
+### 发布分支
+
+如果看到：
+
+```text
+Publish branch
+```
+
+说明这个分支还没有上传到 GitHub。
+
+点击后，这个分支就会出现在 GitHub 上。
+
+## 6. 什么时候必须建新分支
+
+建议这些情况建新分支：
+
+- 开始做一个新功能。
+- 修改很多文件。
+- 不确定改动会不会成功。
+- 多个对话或多个人同时推进项目。
+
+这些情况可以先不建新分支：
+
+- 改一小段文档。
+- 补充教程。
+- 修改一个很小的说明。
+
+## 7. 推荐工作流程
+
+简单版：
+
+```text
+建分支
+改文件
+Commit
+Push
+确认没问题
+合并回 main
+```
+
+如果现在只有你一个人操作，可以先记住：
+
+```text
+main 是主线
+分支是临时工作线
+Commit 是本机保存
+Push 是上传 GitHub
+Pull 是从 GitHub 下载更新
+```
