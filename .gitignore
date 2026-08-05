@@ -38,3 +38,5 @@ docs/学习文档/
 *.sqlite3
 *.db
 *.bak
+database/mysql-data/
+database/backups/
