@@ -30,6 +30,9 @@ uploads/
 tmp/
 temp/
 
+# Local-only learning notes
+docs/学习文档/
+
 # Database/runtime artifacts
 *.sqlite
 *.sqlite3
