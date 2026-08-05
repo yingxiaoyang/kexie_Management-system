@@ -101,6 +101,12 @@ git pull
 
 ## 3. 第一次连接 GitHub
 
+当前项目远程仓库地址：
+
+```text
+https://github.com/yingxiaoyang/kexie_Management-system.git
+```
+
 ### 3.1 在 GitHub 网站创建远程仓库
 
 1. 打开 GitHub。
@@ -134,9 +140,129 @@ git remote -v
 
 如果看到 `origin` 后面跟着 GitHub 地址，说明本地和 GitHub 已经连接。
 
-## 4. 常见问题
+## 4. GitHub Desktop 怎么用
 
-### 4.1 为什么不提交 node_modules
+GitHub Desktop 是 GitHub 官方桌面端。它不是必须安装，但对初学者很有用，因为可以少记一些命令，用按钮完成提交、推送、拉取、切换分支。
+
+当前项目已经在本机初始化为 Git 仓库，位置是：
+
+`D:\kexiexitong`
+
+所以第一次使用 GitHub Desktop 时，应选择：
+
+```text
+Add an Existing Repository from your local drive...
+```
+
+然后选择：
+
+```text
+D:\kexiexitong
+```
+
+不要优先点击：
+
+```text
+Clone yingxiaoyang/kexie_Management-system
+```
+
+因为 Clone 会把 GitHub 上的仓库重新下载到另一个文件夹，容易和当前正在使用的 `D:\kexiexitong` 混在一起。
+
+### 4.1 GitHub Desktop 常用按钮
+
+#### Changes
+
+显示当前改了哪些文件。
+
+相当于命令：
+
+```powershell
+git status
+```
+
+#### Summary
+
+填写本次提交说明。
+
+建议写清楚做了什么，例如：
+
+```text
+docs: update github desktop guide
+```
+
+#### Commit to main
+
+把当前修改保存到本地 Git 历史。
+
+相当于命令：
+
+```powershell
+git add .
+git commit -m "提交说明"
+```
+
+#### Push origin
+
+把本地提交同步到 GitHub。
+
+相当于命令：
+
+```powershell
+git push
+```
+
+#### Fetch origin
+
+检查 GitHub 上有没有别人提交的新内容，但不会直接合并。
+
+#### Pull origin
+
+把 GitHub 上的新内容拉到本机。
+
+相当于命令：
+
+```powershell
+git pull
+```
+
+### 4.2 GitHub Desktop 推荐日常流程
+
+1. 打开 GitHub Desktop。
+2. 确认左上角仓库是 `kexie_Management-system` 或本地路径是 `D:\kexiexitong`。
+3. 开始改项目文件。
+4. 回到 GitHub Desktop，看 `Changes` 列表。
+5. 在 `Summary` 写提交说明。
+6. 点击 `Commit to main` 或 `Commit to 当前分支`。
+7. 点击 `Push origin` 同步到 GitHub。
+
+### 4.3 分支怎么在 GitHub Desktop 里用
+
+顶部菜单选择：
+
+```text
+Branch -> New Branch
+```
+
+新建分支时按项目规则命名，例如：
+
+```text
+setup/frontend-existing-cleanup
+feature/backend-data-model
+feature/submission-review
+```
+
+切换分支时，点击顶部当前分支名称，再选择目标分支。
+
+建议：
+
+- 文档和版本管理用 `setup/github-guide`。
+- 前端结构整理用 `setup/frontend-existing-cleanup`。
+- 后端数据模型用 `feature/backend-data-model`。
+- 不同任务不要混在同一个分支里做。
+
+## 5. 常见问题
+
+### 5.1 为什么不提交 node_modules
 
 `node_modules` 是前端依赖目录，文件很多，也可以通过 `package-lock.json` 重新安装。提交它会让仓库变得巨大，协作时也容易出问题。
 
@@ -148,11 +274,11 @@ npm.cmd install
 
 就可以重新安装依赖。
 
-### 4.2 为什么不提交 dist
+### 5.2 为什么不提交 dist
 
 `dist` 是构建结果，可以重新生成，不是源代码。通常提交源代码，不提交构建产物。
 
-### 4.3 忘记先 pull 就改代码怎么办
+### 5.3 忘记先 pull 就改代码怎么办
 
 先保存自己的修改：
 
@@ -169,7 +295,7 @@ git pull
 
 如果出现冲突，需要按 Git 提示处理冲突文件，再重新提交。
 
-## 5. 推荐习惯
+## 6. 推荐习惯
 
 - 每完成一个小阶段就提交一次。
 - 提交说明写清楚，不写 `update`、`test` 这类看不出意义的描述。
