@@ -29,6 +29,7 @@ Desktop.ini
 .vscode/
 .idea/
 *.local
+~$*
 
 # Local runtime files planned for later phases
 storage/
@@ -46,3 +47,7 @@ docs/学习文档/
 *.bak
 database/mysql-data/
 database/backups/
+
+# Local verification artifacts
+server/templates/import/*.inspect.ndjson
+server/templates/import/.*-download-test.*
