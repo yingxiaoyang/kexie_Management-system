@@ -172,4 +172,19 @@ router.patch('/:id/status', async (req, res, next) => {
   }
 });
 
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const [result] = await pool.execute(
+      `UPDATE archive_templates
+       SET status = 'disabled', deleted_at = NOW(), updated_at = NOW()
+       WHERE id = ? AND deleted_at IS NULL`,
+      [req.params.id]
+    );
+    if (!result.affectedRows) throw notFound('Archive template not found');
+    success(res, null, 'Archive template deleted');
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

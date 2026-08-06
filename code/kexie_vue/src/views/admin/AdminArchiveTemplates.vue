@@ -28,7 +28,7 @@
         <el-table-column label="保留空目录" width="105"><template #default="{ row }">{{ row.templateConfig.preserveEmptyFolders ? '是' : '否' }}</template></el-table-column>
         <el-table-column prop="updatedAt" label="更新时间" width="180"><template #default="{ row }">{{ formatTime(row.updatedAt) }}</template></el-table-column>
         <el-table-column prop="status" label="状态" width="90"><template #default="{ row }"><el-tag :type="row.status === 'enabled' ? 'success' : 'info'">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button text @click="openEdit(row)">编辑</el-button><el-button text @click="showRowPreview(row)">预览</el-button><el-button text :type="row.status === 'enabled' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="285" fixed="right"><template #default="{ row }"><el-button text @click="openEdit(row)">编辑</el-button><el-button text @click="showRowPreview(row)">预览</el-button><el-button text :type="row.status === 'enabled' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button><el-button text type="danger" @click="deleteTemplate(row)">删除</el-button></template></el-table-column>
       </el-table>
 
       <div class="mobile-card-list">
@@ -36,7 +36,7 @@
         <article v-for="row in templates" :key="row.id" class="mobile-data-card">
           <div class="mobile-card-header"><div><p class="mobile-card-title">{{ row.templateName }}</p><div class="mobile-card-meta"><span>{{ formatTime(row.updatedAt) }}</span></div></div><el-tag :type="row.status === 'enabled' ? 'success' : 'info'" size="small">{{ statusLabel(row.status) }}</el-tag></div>
           <div class="mobile-card-body"><div style="grid-column: 1 / -1"><span class="mobile-field-label">项目根目录</span><span class="mobile-field-value">{{ projectRootRule(row) }}</span></div><div><span class="mobile-field-label">目录</span><span class="mobile-field-value">{{ nodeStats(row).folders }} 个</span></div><div><span class="mobile-field-label">文件任务</span><span class="mobile-field-value">{{ nodeStats(row).tasks }} 个</span></div></div>
-          <div class="mobile-card-footer"><el-button @click="openEdit(row)">编辑</el-button><el-button @click="showRowPreview(row)">预览</el-button><el-button :type="row.status === 'enabled' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></div>
+          <div class="mobile-card-footer"><el-button @click="openEdit(row)">编辑</el-button><el-button @click="showRowPreview(row)">预览</el-button><el-button :type="row.status === 'enabled' ? 'warning' : 'success'" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button><el-button type="danger" plain @click="deleteTemplate(row)">删除</el-button></div>
         </article>
       </div>
       <div v-if="pagination.total" class="pagination-row"><el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadTemplates" /></div>
@@ -341,6 +341,21 @@ async function toggleStatus(row) {
   const status = row.status === 'enabled' ? 'disabled' : 'enabled'
   try { await ElMessageBox.confirm(`确认${status === 'enabled' ? '启用' : '停用'}模板“${row.templateName}”吗？`, '模板状态', { type: 'warning' }); await apiRequest(`/archive-templates/${row.id}/status`, { method: 'PATCH', body: { status } }); ElMessage.success('模板状态已更新'); await loadTemplates() }
   catch (error) { if (error !== 'cancel') ElMessage.error(error.message || '操作失败') }
+}
+async function deleteTemplate(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除模板“${row.templateName}”吗？删除后不能再用于新建导出，已有导出记录不受影响。`,
+      '删除归档模板',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+    )
+    await apiRequest(`/archive-templates/${row.id}`, { method: 'DELETE' })
+    ElMessage.success('归档模板已删除')
+    if (templates.value.length === 1 && pagination.page > 1) pagination.page -= 1
+    await loadTemplates()
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error(error.message || '删除失败')
+  }
 }
 async function showRowPreview(row) {
   try {
