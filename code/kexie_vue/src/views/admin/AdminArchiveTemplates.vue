@@ -226,9 +226,17 @@ function legacyToV2(config) {
   return { projectRootRule: '{项目编号}-{作品名称}', preserveEmptyFolders: false, defaultFileNameRule: config.fileNameRule || '{材料类别}_{原文件名}', nodes: children, legacyConverted: true }
 }
 async function openEdit(row) {
-  const config = Number(row.templateConfig.version) >= 2 ? structuredClone(row.templateConfig) : legacyToV2(row.templateConfig)
-  Object.assign(form, newForm(), config, { id: row.id, templateName: row.templateName, enabled: row.status === 'enabled' })
-  selectedId.value = ''; libraryKeyword.value = ''; dialogVisible.value = true; await loadTaskLibrary()
+  try {
+    // templateConfig comes from a reactive table row. structuredClone cannot
+    // clone Vue Proxy objects, while the JSON round-trip safely produces the
+    // plain data structure required by the editor.
+    const rawConfig = JSON.parse(JSON.stringify(row.templateConfig || {}))
+    const config = Number(rawConfig.version) >= 2 ? rawConfig : legacyToV2(rawConfig)
+    Object.assign(form, newForm(), config, { id: row.id, templateName: row.templateName, enabled: row.status === 'enabled' })
+    selectedId.value = ''; libraryKeyword.value = ''; dialogVisible.value = true; await loadTaskLibrary()
+  } catch (error) {
+    ElMessage.error(error.message || '模板数据读取失败，请刷新后重试')
+  }
 }
 function resetForm() { formRef.value?.clearValidate(); selectedId.value = '' }
 
