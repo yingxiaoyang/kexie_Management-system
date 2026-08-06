@@ -49,10 +49,10 @@
       <header class="topbar">
         <h1 class="topbar-title">{{ route.meta.title }}</h1>
         <div class="topbar-tools">
-          <el-tag effect="plain">管理员</el-tag>
-          <el-button text @click="$router.push('/')">
+          <el-tag effect="plain">{{ authStore.state.user?.displayName || '管理员' }}</el-tag>
+          <el-button text @click="logout">
             <el-icon><Switch /></el-icon>
-            切换入口
+            退出登录
           </el-button>
         </div>
       </header>
@@ -65,6 +65,14 @@
 
 <script setup>
 import { useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
+import { authStore } from '../../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
+
+function logout() {
+  authStore.logout()
+  router.replace('/login')
+}
 </script>

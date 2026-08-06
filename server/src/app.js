@@ -3,9 +3,14 @@ import express from 'express';
 import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
+import accountRoutes from './routes/accounts.js';
 import healthRoutes from './routes/health.js';
+import importRoutes from './routes/imports.js';
 import importTemplateRoutes from './routes/importTemplates.js';
 import materialTaskRoutes from './routes/materialTasks.js';
+import peopleRoutes from './routes/people.js';
+import projectRoutes from './routes/projects.js';
+import submissionRoutes from './routes/submissions.js';
 import uploadRoutes from './routes/uploads.js';
 
 export function createApp() {
@@ -28,8 +33,13 @@ export function createApp() {
   app.use('/health', healthRoutes);
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
+  app.use('/api/accounts', accountRoutes);
+  app.use('/api/projects', projectRoutes);
+  app.use('/api/people', peopleRoutes);
+  app.use('/api/imports', importRoutes);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/material-tasks', materialTaskRoutes);
+  app.use('/api/submissions', submissionRoutes);
   app.use('/api/import-templates', importTemplateRoutes);
 
   app.use(notFoundHandler);

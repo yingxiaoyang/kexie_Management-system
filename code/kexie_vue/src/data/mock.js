@@ -9,12 +9,14 @@ export const ownerTasks = [
   {
     name: '中期检查材料',
     project: '智能实验室预约与耗材管理系统',
+    templates: ['中期检查报告模板.docx', '研究日志模板.xlsx'],
     deadline: '2026-08-20',
     status: '未提交',
   },
   {
     name: '研究日志汇总',
     project: '校园低碳行为数据分析',
+    templates: ['研究日志模板.xlsx'],
     deadline: '2026-08-18',
     status: '退回',
     reason: '缺少指导老师签字页',
@@ -22,6 +24,7 @@ export const ownerTasks = [
   {
     name: '阶段报销凭证',
     project: '智能实验室预约与耗材管理系统',
+    templates: [],
     deadline: '2026-09-05',
     status: '已提交',
   },
@@ -136,7 +139,7 @@ export const people = [
 
 export const accounts = [
   { name: '李明', role: '项目负责人', account: '2026123001', status: '启用' },
-  { name: '周老师', role: '只读查看人员', account: 'T20260018', status: '启用' },
+  { name: '赵雨', role: '项目负责人', account: '2026123008', status: '启用' },
   { name: '科研秘书', role: '管理员', account: 'admin', status: '启用' },
 ]
 
@@ -145,6 +148,7 @@ export const materialTasks = [
     name: '中期检查材料',
     scope: '2026 年全部在研项目',
     categories: '报告书、研究日志、签字页',
+    templates: ['中期检查报告模板.docx', '研究日志模板.xlsx'],
     deadline: '2026-08-20',
     status: '收集中',
   },
@@ -152,6 +156,7 @@ export const materialTasks = [
     name: '阶段报销凭证',
     scope: '已通过中期检查项目',
     categories: '发票、报销汇总表',
+    templates: ['报销汇总表模板.xlsx'],
     deadline: '2026-09-05',
     status: '未开始',
   },
