@@ -7,13 +7,27 @@
         <el-select v-model="filters.role" placeholder="角色" clearable style="width: 160px"><el-option label="管理员" value="admin" /><el-option label="项目负责人" value="project_owner" /></el-select>
         <el-button :loading="loading" @click="loadAccounts">查询</el-button>
       </div></div>
-      <el-table v-loading="loading" :data="accounts" style="width: 100%" empty-text="暂无账号数据">
+      <el-table v-loading="loading" :data="accounts" class="desktop-table" style="width: 100%" empty-text="暂无账号数据">
         <el-table-column prop="displayName" label="显示名称" width="140" /><el-table-column prop="username" label="账号" min-width="160" />
         <el-table-column prop="role" label="角色" width="140"><template #default="{ row }">{{ row.role === 'admin' ? '管理员' : '项目负责人' }}</template></el-table-column>
         <el-table-column prop="status" label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status === 'enabled' ? 'success' : 'info'">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="首次改密" width="100"><template #default="{ row }"><el-tag v-if="row.passwordResetRequired" type="warning">待修改</el-tag><span v-else>已完成</span></template></el-table-column>
         <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button text @click="resetPassword(row)">重置密码</el-button><el-button text :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
+      <div class="mobile-card-list">
+        <el-empty v-if="!accounts.length && !loading" class="empty-mobile" description="暂无账号数据" :image-size="72" />
+        <article v-for="row in accounts" :key="row.id" class="mobile-data-card">
+          <div class="mobile-card-header">
+            <div><p class="mobile-card-title">{{ row.displayName }}</p><div class="mobile-card-meta"><span>{{ row.username }}</span><span>{{ row.role === 'admin' ? '管理员' : '项目负责人' }}</span></div></div>
+            <el-tag :type="row.status === 'enabled' ? 'success' : 'info'" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </div>
+          <div class="mobile-card-body">
+            <div><span class="mobile-field-label">首次改密</span><span class="mobile-field-value">{{ row.passwordResetRequired ? '待修改' : '已完成' }}</span></div>
+            <div><span class="mobile-field-label">账号状态</span><span class="mobile-field-value">{{ statusLabel(row.status) }}</span></div>
+          </div>
+          <div class="mobile-card-footer"><el-button @click="resetPassword(row)">重置密码</el-button><el-button :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></div>
+        </article>
+      </div>
       <div class="pagination-row" v-if="pagination.total"><el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadAccounts" /></div>
     </div>
 

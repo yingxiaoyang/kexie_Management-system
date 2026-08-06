@@ -26,7 +26,7 @@
         </div>
       </div>
 
-      <el-table v-loading="loading" :data="projects" style="width: 100%" empty-text="暂无项目数据">
+      <el-table v-loading="loading" :data="projects" class="desktop-table" style="width: 100%" empty-text="暂无项目数据">
         <el-table-column prop="projectYear" label="年度" width="90" />
         <el-table-column prop="projectGroup" label="组别" width="130" />
         <el-table-column prop="projectCode" label="项目编号" width="150" />
@@ -39,6 +39,20 @@
           <template #default="{ row }"><el-button text @click="openForm(row)">编辑</el-button></template>
         </el-table-column>
       </el-table>
+      <div class="mobile-card-list">
+        <el-empty v-if="!projects.length && !loading" class="empty-mobile" description="暂无项目数据" :image-size="72" />
+        <article v-for="row in projects" :key="row.id" class="mobile-data-card">
+          <div class="mobile-card-header">
+            <div><p class="mobile-card-title">{{ row.title }}</p><div class="mobile-card-meta"><span>{{ row.projectCode }}</span><span>{{ row.projectYear }} 年</span></div></div>
+            <el-tag effect="plain" size="small">{{ statusLabel(row.status) }}</el-tag>
+          </div>
+          <div class="mobile-card-body">
+            <div><span class="mobile-field-label">组别</span><span class="mobile-field-value">{{ row.projectGroup || '未分组' }}</span></div>
+            <div><span class="mobile-field-label">负责人</span><span class="mobile-field-value">{{ row.owners || '未填写' }}</span></div>
+          </div>
+          <div class="mobile-card-footer"><span class="muted">项目资料维护</span><el-button type="primary" plain @click="openForm(row)">编辑项目</el-button></div>
+        </article>
+      </div>
       <div class="pagination-row" v-if="pagination.total">
         <el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadProjects" />
       </div>

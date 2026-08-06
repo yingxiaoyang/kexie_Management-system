@@ -12,7 +12,7 @@
           <el-button :loading="loading" @click="loadPeople">查询</el-button>
         </div>
       </div>
-      <el-table v-loading="loading" :data="people" style="width: 100%" empty-text="暂无人员数据">
+      <el-table v-loading="loading" :data="people" class="desktop-table" style="width: 100%" empty-text="暂无人员数据">
         <el-table-column prop="name" label="姓名" width="100" />
         <el-table-column prop="personType" label="类型" width="110"><template #default="{ row }">{{ row.personType === 'student' ? '学生' : '指导老师' }}</template></el-table-column>
         <el-table-column prop="identifier" label="学号/工号" width="150" />
@@ -21,6 +21,20 @@
         <el-table-column label="项目统计" width="160"><template #default="{ row }">负责 {{ Number(row.ownerProjectCount) }} / 参与 {{ Number(row.memberProjectCount) }}</template></el-table-column>
         <el-table-column label="操作" width="170" fixed="right"><template #default="{ row }"><el-button text @click="openForm(row)">编辑</el-button><el-button text @click="showProjects(row)">参与项目</el-button></template></el-table-column>
       </el-table>
+      <div class="mobile-card-list">
+        <el-empty v-if="!people.length && !loading" class="empty-mobile" description="暂无人员数据" :image-size="72" />
+        <article v-for="row in people" :key="row.id" class="mobile-data-card">
+          <div class="mobile-card-header">
+            <div><p class="mobile-card-title">{{ row.name }}</p><div class="mobile-card-meta"><span>{{ row.personType === 'student' ? '学生' : '指导老师' }}</span><span>{{ row.identifier }}</span></div></div>
+            <el-tag effect="plain" size="small">负责 {{ Number(row.ownerProjectCount) }}</el-tag>
+          </div>
+          <div class="mobile-card-body">
+            <div><span class="mobile-field-label">学院 / 单位</span><span class="mobile-field-value">{{ row.organization || '未填写' }}</span></div>
+            <div><span class="mobile-field-label">联系电话</span><span class="mobile-field-value">{{ row.phone || '未填写' }}</span></div>
+          </div>
+          <div class="mobile-card-footer"><el-button @click="showProjects(row)">参与项目</el-button><el-button type="primary" plain @click="openForm(row)">编辑资料</el-button></div>
+        </article>
+      </div>
       <div class="pagination-row" v-if="pagination.total"><el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadPeople" /></div>
     </div>
 
