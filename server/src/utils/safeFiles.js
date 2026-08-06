@@ -25,6 +25,9 @@ export async function resolveDownloadFile(rootPath, storedPath, {
   const candidatePath = path.isAbsolute(rawPath)
     ? path.resolve(rawPath)
     : path.resolve(rootPath, rawPath);
+  if (!isPathInside(rootRealPath, candidatePath)) {
+    throw forbidden(invalidMessage, invalidCode);
+  }
   const fileRealPath = await fs.promises.realpath(candidatePath).catch((error) => {
     if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
     throw error;

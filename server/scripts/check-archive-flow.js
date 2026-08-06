@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import jwt from 'jsonwebtoken';
 import { env } from '../src/config/env.js';
 import { pool } from '../src/db/pool.js';
@@ -254,7 +255,9 @@ async function main() {
       const invalidDownload = await fetch(`${apiBase}/archive-exports/${missingCheck.exportId}/download`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (invalidDownload.status !== 403) throw new Error('Download path outside export root was not rejected');
+      if (invalidDownload.status !== 403) {
+        throw new Error(`Download path outside export root was not rejected: ${invalidDownload.status} ${await invalidDownload.text()}`);
+      }
     } finally {
       await pool.execute(
         'UPDATE archive_export_records SET export_file_path = ? WHERE id = ?',
@@ -291,7 +294,7 @@ async function main() {
 }
 
 function pathOutsideExportRoot() {
-  return new URL('../uploads/not-an-export.zip', `file:///${env.archive.root.replace(/\\/g, '/')}/`).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  return path.resolve(env.archive.root, '..', 'uploads', 'not-an-export.zip');
 }
 
 main()

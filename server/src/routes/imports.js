@@ -2,16 +2,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import multer from 'multer';
-import XLSX from 'xlsx';
 import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { badRequest, notFound } from '../utils/errors.js';
+import { EXCEL_LIMITS, readWorkbook, worksheetRows } from '../utils/excel.js';
 import { success } from '../utils/response.js';
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 1 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: EXCEL_LIMITS.maxFileBytes, files: 1 } });
 const batchDir = path.resolve(env.upload.root, '../imports/batches');
 const sheetDefinitions = {
   projects: { name: '1_项目', key: 'project_code', required: ['project_year', 'project_code', 'title'] },
@@ -37,11 +37,7 @@ function numeric(value, fallback = 0) {
 }
 
 function readRows(workbook, definition) {
-  const sheet = workbook.Sheets[definition.name];
-  if (!sheet) return null;
-  return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' })
-    .map((row, index) => ({ ...row, __rowNumber: index + 2 }))
-    .filter((row) => Object.entries(row).some(([key, value]) => key !== '__rowNumber' && clean(value)));
+  return worksheetRows(workbook, definition.name);
 }
 
 function addError(errors, sheet, row, field, value, reason) {
@@ -71,12 +67,7 @@ function duplicateErrors(rows, definition, errors, keyBuilder) {
 }
 
 async function validateWorkbook(buffer) {
-  let workbook;
-  try {
-    workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-  } catch {
-    throw badRequest('无法读取 Excel 工作簿', 'VALIDATION_ERROR');
-  }
+  const workbook = await readWorkbook(buffer);
   const data = {};
   const errors = [];
   for (const [key, definition] of Object.entries(sheetDefinitions)) {

@@ -309,14 +309,14 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     missingRows.push(['', '', '', '', '', '', '', '', '', '导出范围内没有匹配的材料任务、项目或材料类别']);
   }
 
-  zip.append(xlsxBuffer(
+  zip.append(await xlsxBuffer(
     ['项目序号', '年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '原文件名', 'ZIP 内路径', '提交版本ID', '审核通过时间'],
     exportedRows,
     '导出材料清单'
   ), { name: uniqueArchiveEntry('导出材料清单.xlsx', usedEntries) });
 
   if (missingRows.length) {
-    zip.append(xlsxBuffer(
+    zip.append(await xlsxBuffer(
       ['项目序号', '年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '缺失原因'],
       missingRows,
       '缺失材料报告'

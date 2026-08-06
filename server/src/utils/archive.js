@@ -1,6 +1,6 @@
 import path from 'node:path';
-import XLSX from 'xlsx';
 import { badRequest } from './errors.js';
+import { xlsxBuffer } from './excel.js';
 
 export const ARCHIVE_PLACEHOLDERS = [
   '项目序号', '项目序号两位', '项目序号三位', '材料序号', '材料序号两位',
@@ -301,13 +301,4 @@ export function csvText(headers, rows) {
   return `\ufeff${[headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\r\n')}`;
 }
 
-export function xlsxBuffer(headers, rows, sheetName = '数据') {
-  const data = [headers, ...rows];
-  const worksheet = XLSX.utils.aoa_to_sheet(data);
-  worksheet['!cols'] = headers.map((_header, columnIndex) => ({
-    wch: Math.min(50, Math.max(12, ...data.map((row) => String(row[columnIndex] ?? '').length + 2)))
-  }));
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, String(sheetName || '数据').slice(0, 31));
-  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true });
-}
+export { xlsxBuffer };

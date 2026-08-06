@@ -7,25 +7,32 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "db:init": "node scripts/init-db.js",
-    "check": "node --check src/index.js && node --check scripts/init-db.js && node --check scripts/check-auth-session.js && node --check scripts/check-security.js && node --check scripts/check-owner-access.js && node --check scripts/check-archive-flow.js && node --check scripts/check-archive-tree-flow.js && node scripts/check-modules.js",
+    "check": "node --check src/index.js && node --check scripts/init-db.js && node --check scripts/check-auth-session.js && node --check scripts/check-security.js && node --check scripts/check-owner-access.js && node --check scripts/check-archive-flow.js && node --check scripts/check-archive-tree-flow.js && node --check scripts/check-excel-safety.js && node --check scripts/check-import-excel-flow.js && node --check scripts/check-safe-file-paths.js && node scripts/check-safe-file-paths.js && node scripts/check-modules.js",
     "check:auth": "node scripts/check-auth-session.js",
     "check:security": "node scripts/check-security.js",
     "check:owner-access": "node scripts/check-owner-access.js",
     "check:archive": "node scripts/check-archive-flow.js",
-    "check:archive-tree": "node scripts/check-archive-tree-flow.js"
+    "check:archive-tree": "node scripts/check-archive-tree-flow.js",
+    "check:excel": "node scripts/check-excel-safety.js",
+    "check:import-excel": "node scripts/check-import-excel-flow.js",
+    "check:safe-files": "node scripts/check-safe-file-paths.js",
+    "build:import-template": "node scripts/build-import-template.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
-    "mysql2": "^3.11.5",
-    "xlsx": "^0.18.5"
+    "mysql2": "^3.11.5"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
