@@ -73,6 +73,13 @@ DB_PASSWORD=<数据库密码>
 JWT_SECRET=<登录令牌密钥>
 AUTH_COOKIE_NAME=kexie_session
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+TRUST_PROXY=false
+REQUEST_BODY_LIMIT=256kb
+LOGIN_RATE_LIMIT_WINDOW_MINUTES=15
+LOGIN_RATE_LIMIT_MAX=20
+ADMIN_LOGIN_RATE_LIMIT_MAX=10
+ACCOUNT_LOCK_MINUTES=15
+ADMIN_ACCOUNT_LOCK_MINUTES=30
 UPLOAD_ROOT=../storage/uploads
 MAX_UPLOAD_FILE_MB=50
 MAX_TASK_PROJECT_UPLOAD_MB=500
@@ -87,9 +94,25 @@ ALLOWED_UPLOAD_EXTENSIONS=pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,zip
 - 项目负责人账号由管理员创建，并生成初始密码。
 - `password_reset_required=1` 表示首次登录或重置后必须改密。
 - `token_version` 用于让停用、删除、改密、重置和退出前的旧会话立即失效。
+- 连续输错密码 5 次后临时锁定；负责人默认 15 分钟，管理员默认 30 分钟，成功登录后清零。
+- 登录接口按客户端 IP 限流；默认 15 分钟内普通账号最多 20 次，管理员最多 10 次。
 - 负责人忘记密码时，由管理员重置密码。
 
-## 5. 文件上传
+## 5. 生产安全配置
+
+- 服务使用 Helmet 安全响应头，并将 JSON 和表单请求体默认限制为 `256kb`。
+- 浏览器携带不在 `CORS_ORIGINS` 白名单中的 `Origin` 时，服务返回 `ORIGIN_NOT_ALLOWED`。
+- 反向代理部署建议使用 `TRUST_PROXY=loopback`；不要在生产环境设置 `TRUST_PROXY=true`。
+- `NODE_ENV=production` 时，JWT 密钥、数据库密码、初始管理员密码仍为示例值或过短，CORS 使用通配符、HTTP、本机地址，或代理信任配置过宽时，服务会拒绝启动。
+- 日志只记录方法、路径、状态、错误码、客户端 IP、账号 ID、角色和失败原因等允许字段，不记录密码、Cookie、Authorization 或完整请求体。
+
+真实安全闭环检查：
+
+```powershell
+npm.cmd run check:security
+```
+
+## 6. 文件上传
 
 本地存储目录默认位于：
 
@@ -104,7 +127,7 @@ D:\kexiexitong\storage\uploads
 - 允许扩展名：PDF、DOC、DOCX、XLS、XLSX、PPT、PPTX、JPG、JPEG、PNG、ZIP。
 - 管理员创建材料任务时可以在默认范围内进一步限制文件类型和大小。
 
-## 6. 已有基础接口
+## 7. 已有基础接口
 
 - `GET /api/health`：健康检查。
 - `POST /api/auth/login`：登录。

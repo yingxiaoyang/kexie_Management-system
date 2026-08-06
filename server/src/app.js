@@ -1,5 +1,6 @@
 import cors from 'cors';
 import express from 'express';
+import helmet from 'helmet';
 import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
@@ -14,9 +15,23 @@ import peopleRoutes from './routes/people.js';
 import projectRoutes from './routes/projects.js';
 import submissionRoutes from './routes/submissions.js';
 import uploadRoutes from './routes/uploads.js';
+import { forbidden } from './utils/errors.js';
+
+function originGuard(req, res, next) {
+  const origin = req.headers.origin;
+  if (!origin || env.corsOrigins.includes(origin)) {
+    next();
+    return;
+  }
+  next(forbidden('Request origin is not allowed', 'ORIGIN_NOT_ALLOWED'));
+}
 
 export function createApp() {
   const app = express();
+
+  app.set('trust proxy', env.trustProxy);
+  app.use(helmet());
+  app.use(originGuard);
 
   app.use(cors({
     origin(origin, callback) {
@@ -29,8 +44,8 @@ export function createApp() {
     credentials: true
   }));
 
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: true }));
+  app.use(express.json({ limit: env.security.bodyLimit }));
+  app.use(express.urlencoded({ extended: true, limit: env.security.bodyLimit }));
 
   app.use('/health', healthRoutes);
   app.use('/api/health', healthRoutes);

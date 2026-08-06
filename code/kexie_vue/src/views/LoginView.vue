@@ -32,6 +32,11 @@ const formRef = ref()
 const loading = ref(false)
 const errorMessage = ref('')
 const form = reactive({ username: '', password: '' })
+const loginErrorMessages = {
+  INVALID_CREDENTIALS: '账号或密码错误',
+  ACCOUNT_LOCKED: '账号已临时锁定，请稍后再试',
+  LOGIN_RATE_LIMITED: '登录尝试过于频繁，请稍后再试',
+}
 const rules = {
   username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
@@ -46,7 +51,7 @@ async function submit() {
     if (user.passwordResetRequired) await router.replace('/change-password')
     else await router.replace(route.query.redirect || authStore.homeForRole(user.role))
   } catch (error) {
-    errorMessage.value = error.code === 'INVALID_CREDENTIALS' ? '账号或密码错误' : error.message
+    errorMessage.value = loginErrorMessages[error.code] || error.message
   } finally {
     loading.value = false
   }

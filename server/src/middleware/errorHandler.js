@@ -1,7 +1,8 @@
 import { fail } from '../utils/response.js';
+import { logServerError } from '../utils/securityLog.js';
 
 export function notFoundHandler(req, res, next) {
-  const error = new Error(`Route not found: ${req.method} ${req.originalUrl}`);
+  const error = new Error(`Route not found: ${req.method} ${req.path}`);
   error.status = 404;
   error.code = 'ROUTE_NOT_FOUND';
   next(error);
@@ -27,9 +28,13 @@ export function errorHandler(error, req, res, next) {
     }
   }
 
-  if (!error.status) {
-    console.error(error);
+  if (error.type === 'entity.too.large') {
+    error.status = 413;
+    error.code = 'REQUEST_BODY_TOO_LARGE';
+    error.message = 'Request body exceeds the allowed limit';
   }
+
+  logServerError(error, req);
 
   fail(res, error);
 }
