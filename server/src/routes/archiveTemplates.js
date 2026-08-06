@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { archivePreview, normalizeArchiveTemplateConfig } from '../utils/archive.js';
+import { archivePlacements, archivePreview, normalizeArchiveTemplateConfig } from '../utils/archive.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
@@ -26,7 +26,54 @@ function mapTemplate(row) {
   };
 }
 
+async function validateTaskReferences(templateConfig) {
+  if (templateConfig.version !== 2) return;
+  const placements = archivePlacements(templateConfig);
+  const fileTaskIds = placements.map((item) => item.fileTaskId);
+  const [rows] = await pool.execute(
+    `SELECT mc.id, mc.material_task_id AS materialTaskId
+     FROM material_categories mc
+     JOIN material_tasks mt ON mt.id = mc.material_task_id AND mt.deleted_at IS NULL
+     WHERE mc.deleted_at IS NULL AND mc.id IN (${fileTaskIds.map(() => '?').join(',')})`,
+    fileTaskIds
+  );
+  const actual = new Map(rows.map((row) => [Number(row.id), Number(row.materialTaskId)]));
+  if (placements.some((item) => actual.get(item.fileTaskId) !== item.materialTaskId)) {
+    throw badRequest('Archive template contains an invalid material task or file task reference', 'VALIDATION_ERROR');
+  }
+}
+
 router.use(requireAuth, requireRole('admin'));
+
+router.get('/task-library', async (_req, res, next) => {
+  try {
+    const [tasks] = await pool.execute(
+      `SELECT mt.id, mt.task_name AS taskName, mt.task_description AS taskDescription,
+              mt.status, mc.id AS fileTaskId, mc.category_name AS fileTaskName,
+              mc.task_description AS fileTaskDescription, mc.is_required AS isRequired,
+              mc.sort_order AS sortOrder
+       FROM material_tasks mt
+       JOIN material_categories mc ON mc.material_task_id = mt.id AND mc.deleted_at IS NULL
+       WHERE mt.deleted_at IS NULL
+       ORDER BY mt.created_at DESC, mt.id DESC, mc.sort_order, mc.id`
+    );
+    const grouped = new Map();
+    for (const row of tasks) {
+      if (!grouped.has(Number(row.id))) grouped.set(Number(row.id), {
+        id: Number(row.id), taskName: row.taskName, taskDescription: row.taskDescription,
+        status: row.status, fileTasks: []
+      });
+      grouped.get(Number(row.id)).fileTasks.push({
+        id: Number(row.fileTaskId), fileTaskId: Number(row.fileTaskId),
+        fileTaskName: row.fileTaskName, taskDescription: row.fileTaskDescription,
+        isRequired: Boolean(row.isRequired), sortOrder: Number(row.sortOrder)
+      });
+    }
+    success(res, [...grouped.values()]);
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try {
@@ -71,6 +118,7 @@ router.get('/', async (req, res, next) => {
 router.post('/preview', async (req, res, next) => {
   try {
     const templateConfig = normalizeArchiveTemplateConfig(req.body.templateConfig);
+    await validateTaskReferences(templateConfig);
     success(res, archivePreview(templateConfig));
   } catch (error) {
     next(error);
@@ -80,6 +128,7 @@ router.post('/preview', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     const data = templatePayload(req.body);
+    await validateTaskReferences(data.templateConfig);
     const [result] = await pool.execute(
       `INSERT INTO archive_templates (template_name, template_config, status, created_by)
        VALUES (?, ?, ?, ?)`,
@@ -94,6 +143,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const data = templatePayload(req.body);
+    await validateTaskReferences(data.templateConfig);
     const [result] = await pool.execute(
       `UPDATE archive_templates
        SET template_name = ?, template_config = ?, status = ?, updated_at = NOW()

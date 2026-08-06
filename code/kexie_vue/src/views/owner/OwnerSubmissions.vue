@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">材料提交</h2>
-        <p class="page-desc">按项目和材料类别完成提交；退回材料会保留审核意见，可直接修改后重交。</p>
+        <p class="page-desc">按统筹任务逐项提交文件；每个子任务一次只接收 1 个文件，退回后可重新提交。</p>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
     <div class="panel">
       <div class="toolbar">
         <div class="filters">
-          <el-input v-model="keyword" placeholder="搜索任务、项目或材料类别" clearable>
+          <el-input v-model="keyword" placeholder="搜索统筹任务、项目或子任务" clearable>
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
           <el-select v-model="statusFilter" placeholder="提交状态" clearable style="width: 150px">
@@ -34,9 +34,9 @@
       </div>
 
       <el-table v-loading="loading" :data="filteredTasks" class="desktop-table" style="width: 100%" empty-text="当前没有符合条件的材料任务">
-        <el-table-column prop="taskName" label="材料任务" min-width="170" />
+        <el-table-column prop="taskName" label="统筹任务" min-width="170" />
         <el-table-column prop="projectTitle" label="所属项目" min-width="210" show-overflow-tooltip />
-        <el-table-column prop="categoryName" label="材料类别" width="140" />
+        <el-table-column prop="categoryName" label="子文件任务" width="150" />
         <el-table-column prop="deadlineAt" label="截止时间" width="180">
           <template #default="{ row }"><span :class="{ 'danger-text': isOverdue(row) }">{{ formatTime(row.deadlineAt) }}</span></template>
         </el-table-column>
@@ -74,7 +74,7 @@
             <el-tag :type="statusType(row)" size="small">{{ statusLabel(row) }}</el-tag>
           </div>
           <div class="mobile-card-body">
-            <div><span class="mobile-field-label">材料类别</span><span class="mobile-field-value">{{ row.categoryName }}</span></div>
+            <div><span class="mobile-field-label">子文件任务</span><span class="mobile-field-value">{{ row.categoryName }}</span></div>
             <div><span class="mobile-field-label">截止时间</span><span class="mobile-field-value" :class="{ 'danger-text': isOverdue(row) }">{{ formatTime(row.deadlineAt) }}</span></div>
             <div v-if="row.returnReason" style="grid-column: 1 / -1">
               <span class="mobile-field-label">审核反馈</span><span class="mobile-field-value danger-text">{{ row.returnReason }}</span>
@@ -96,14 +96,16 @@
     <el-dialog v-model="uploadVisible" :title="`提交：${selected?.categoryName || ''}`" width="560px" @closed="uploadFiles = []">
       <el-descriptions v-if="selected" :column="1" border>
         <el-descriptions-item label="项目">{{ selected.projectTitle }}</el-descriptions-item>
-        <el-descriptions-item label="任务">{{ selected.taskName }}</el-descriptions-item>
-        <el-descriptions-item label="限制">单文件 {{ selected.maxFileMb }}MB，项目累计 {{ selected.maxTaskProjectMb }}MB</el-descriptions-item>
+        <el-descriptions-item label="统筹任务">{{ selected.taskName }}</el-descriptions-item>
+        <el-descriptions-item label="子文件任务">{{ selected.categoryName }}</el-descriptions-item>
+        <el-descriptions-item v-if="selected.fileTaskDescription" label="提交说明">{{ selected.fileTaskDescription }}</el-descriptions-item>
+        <el-descriptions-item label="限制">本次仅 1 个文件，最大 {{ selected.maxFileMb }}MB；项目累计 {{ selected.maxTaskProjectMb }}MB</el-descriptions-item>
       </el-descriptions>
       <el-alert v-if="selected?.returnReason" class="section" :title="`上次退回原因：${selected.returnReason}`" type="error" show-icon :closable="false" />
-      <el-upload class="section" drag action="#" multiple :limit="20" :auto-upload="false" :accept="acceptTypes" :on-change="onFileChange" :on-remove="onFileRemove">
+      <el-upload class="section" drag action="#" :limit="1" :auto-upload="false" :accept="acceptTypes" :on-change="onFileChange" :on-remove="onFileRemove">
         <el-icon size="30"><UploadFilled /></el-icon>
         <div>拖拽文件到此处，或点击选择</div>
-        <template #tip><div class="el-upload__tip">允许格式：{{ allowedExtensionText }}</div></template>
+        <template #tip><div class="el-upload__tip">只能选择 1 个文件；允许格式：{{ allowedExtensionText }}</div></template>
       </el-upload>
       <template #footer>
         <el-button @click="uploadVisible = false">取消</el-button>
@@ -194,7 +196,7 @@ async function submitFiles() {
     body.append('taskId', selected.value.taskId)
     body.append('projectId', selected.value.projectId)
     body.append('categoryId', selected.value.categoryId)
-    uploadFiles.value.forEach((file) => body.append('files', file))
+    body.append('file', uploadFiles.value[0])
     await apiRequest('/uploads/submissions', { method: 'POST', body })
     ElMessage.success('材料提交成功，等待管理员审核')
     uploadVisible.value = false

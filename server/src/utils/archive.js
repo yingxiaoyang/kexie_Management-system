@@ -2,34 +2,25 @@ import path from 'node:path';
 import { badRequest } from './errors.js';
 
 export const ARCHIVE_PLACEHOLDERS = [
-  '年度',
-  '组别',
-  '项目编号',
-  '作品名称',
-  '负责人',
-  '材料任务',
-  '材料类别',
-  '原文件名'
+  '年度', '组别', '项目编号', '作品名称', '负责人', '材料任务', '材料类别', '原文件名'
 ];
 
 export const DEFAULT_ARCHIVE_CONFIG = {
-  version: 1,
-  directoryLevels: [
-    { pattern: '{年度}年' },
-    { pattern: '{组别}' },
-    { pattern: '{项目编号}-{作品名称}' },
-    { pattern: '{材料任务}' },
-    { pattern: '{材料类别}' }
-  ],
-  fileNameRule: '{项目编号}_{作品名称}_{负责人}_{材料类别}_{原文件名}'
+  version: 2,
+  projectRootRule: '{项目编号}-{作品名称}',
+  preserveEmptyFolders: false,
+  defaultFileNameRule: '{材料类别}_{原文件名}',
+  nodes: [
+    { id: 'folder-materials', type: 'folder', nameRule: '材料', children: [] }
+  ]
 };
 
 const placeholderSet = new Set(ARCHIVE_PLACEHOLDERS);
 const windowsReservedName = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 
-function cleanPattern(value, fieldName, maxLength) {
-  const pattern = String(value || '').trim();
-  if (!pattern) throw badRequest(`${fieldName} cannot be empty`, 'VALIDATION_ERROR');
+function cleanPattern(value, fieldName, maxLength, allowEmpty = false) {
+  const pattern = String(value ?? '').trim();
+  if (!pattern && !allowEmpty) throw badRequest(`${fieldName} cannot be empty`, 'VALIDATION_ERROR');
   if (pattern.length > maxLength) throw badRequest(`${fieldName} is too long`, 'VALIDATION_ERROR');
   const placeholders = pattern.match(/\{[^{}]+\}/g) || [];
   for (const token of placeholders) {
@@ -40,27 +31,85 @@ function cleanPattern(value, fieldName, maxLength) {
   return pattern;
 }
 
-export function normalizeArchiveTemplateConfig(input) {
-  let raw = input;
-  if (typeof raw === 'string') {
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      throw badRequest('templateConfig must be valid JSON', 'VALIDATION_ERROR');
-    }
-  }
-  if (!raw || typeof raw !== 'object') throw badRequest('templateConfig is required', 'VALIDATION_ERROR');
+function normalizeLegacy(raw) {
   if (!Array.isArray(raw.directoryLevels) || !raw.directoryLevels.length || raw.directoryLevels.length > 8) {
     throw badRequest('directoryLevels must contain 1 to 8 levels', 'VALIDATION_ERROR');
   }
-  const directoryLevels = raw.directoryLevels.map((item, index) => ({
-    pattern: cleanPattern(typeof item === 'string' ? item : item?.pattern, `directoryLevels[${index}]`, 160)
-  }));
   return {
     version: 1,
-    directoryLevels,
+    directoryLevels: raw.directoryLevels.map((item, index) => ({
+      pattern: cleanPattern(typeof item === 'string' ? item : item?.pattern, `directoryLevels[${index}]`, 160)
+    })),
     fileNameRule: cleanPattern(raw.fileNameRule, 'fileNameRule', 240)
   };
+}
+
+function normalizeV2(raw) {
+  if (!Array.isArray(raw.nodes) || raw.nodes.length > 40) {
+    throw badRequest('nodes must be an array with at most 40 root nodes', 'VALIDATION_ERROR');
+  }
+  const ids = new Set();
+  const fileTaskIds = new Set();
+  let nodeCount = 0;
+  let taskCount = 0;
+  const defaultFileNameRule = cleanPattern(raw.defaultFileNameRule || '{材料类别}_{原文件名}', 'defaultFileNameRule', 240);
+  function walk(nodes, depth, parentPath) {
+    if (depth > 8) throw badRequest('Archive folder nesting cannot exceed 8 levels', 'VALIDATION_ERROR');
+    if (!Array.isArray(nodes)) throw badRequest(`${parentPath}.children must be an array`, 'VALIDATION_ERROR');
+    return nodes.map((item, index) => {
+      nodeCount += 1;
+      if (nodeCount > 300) throw badRequest('Archive template contains too many nodes', 'VALIDATION_ERROR');
+      const nodePath = `${parentPath}[${index}]`;
+      const type = item?.type;
+      const id = String(item?.id || '').trim();
+      if (!id || id.length > 80 || ids.has(id)) throw badRequest(`${nodePath}.id is invalid or duplicated`, 'VALIDATION_ERROR');
+      ids.add(id);
+      if (type === 'folder') {
+        return {
+          id,
+          type: 'folder',
+          nameRule: cleanPattern(item.nameRule, `${nodePath}.nameRule`, 160),
+          children: walk(item.children || [], depth + 1, `${nodePath}.children`)
+        };
+      }
+      if (type !== 'task') throw badRequest(`${nodePath}.type is invalid`, 'VALIDATION_ERROR');
+      const materialTaskId = Number(item.materialTaskId);
+      const fileTaskId = Number(item.fileTaskId);
+      if (!Number.isInteger(materialTaskId) || materialTaskId < 1) throw badRequest(`${nodePath}.materialTaskId is invalid`, 'VALIDATION_ERROR');
+      if (!Number.isInteger(fileTaskId) || fileTaskId < 1 || fileTaskIds.has(fileTaskId)) {
+        throw badRequest(`${nodePath}.fileTaskId is invalid or duplicated`, 'VALIDATION_ERROR');
+      }
+      fileTaskIds.add(fileTaskId);
+      taskCount += 1;
+      return {
+        id,
+        type: 'task',
+        materialTaskId,
+        fileTaskId,
+        materialTaskName: String(item.materialTaskName || '').trim().slice(0, 160),
+        fileTaskName: String(item.fileTaskName || '').trim().slice(0, 120),
+        fileNameRule: cleanPattern(item.fileNameRule || defaultFileNameRule, `${nodePath}.fileNameRule`, 240)
+      };
+    });
+  }
+  const nodes = walk(raw.nodes, 1, 'nodes');
+  if (!taskCount) throw badRequest('Archive template must place at least one file task', 'VALIDATION_ERROR');
+  return {
+    version: 2,
+    projectRootRule: cleanPattern(raw.projectRootRule || '{项目编号}-{作品名称}', 'projectRootRule', 160),
+    preserveEmptyFolders: Boolean(raw.preserveEmptyFolders),
+    defaultFileNameRule,
+    nodes
+  };
+}
+
+export function normalizeArchiveTemplateConfig(input) {
+  let raw = input;
+  if (typeof raw === 'string') {
+    try { raw = JSON.parse(raw); } catch { throw badRequest('templateConfig must be valid JSON', 'VALIDATION_ERROR'); }
+  }
+  if (!raw || typeof raw !== 'object') throw badRequest('templateConfig is required', 'VALIDATION_ERROR');
+  return Number(raw.version) >= 2 ? normalizeV2(raw) : normalizeLegacy(raw);
 }
 
 export function sanitizePathComponent(value, fallback = '未命名') {
@@ -90,35 +139,90 @@ function placeholderValues(context) {
   };
 }
 
-function renderPattern(pattern, context) {
+export function renderPattern(pattern, context) {
   const values = placeholderValues(context);
-  return pattern.replace(/\{([^{}]+)\}/g, (_match, key) => String(values[key] ?? ''));
+  return String(pattern || '').replace(/\{([^{}]+)\}/g, (_match, key) => String(values[key] ?? ''));
+}
+
+function walkTree(nodes, folderSegments = [], result = []) {
+  for (const node of nodes || []) {
+    if (node.type === 'folder') {
+      const next = [...folderSegments, node.nameRule];
+      result.push({ node, folderSegments: next });
+      walkTree(node.children, next, result);
+    } else if (node.type === 'task') {
+      result.push({ node, folderSegments });
+    }
+  }
+  return result;
+}
+
+export function archivePlacements(configInput) {
+  const config = normalizeArchiveTemplateConfig(configInput);
+  if (config.version === 1) return [];
+  return walkTree(config.nodes).filter((item) => item.node.type === 'task').map((item) => ({
+    ...item,
+    fileTaskId: Number(item.node.fileTaskId),
+    materialTaskId: Number(item.node.materialTaskId)
+  }));
+}
+
+export function renderArchiveFolders(configInput, context) {
+  const config = normalizeArchiveTemplateConfig(configInput);
+  if (config.version === 1) {
+    return config.directoryLevels.map((level) => sanitizePathComponent(renderPattern(level.pattern, context)));
+  }
+  const root = sanitizePathComponent(renderPattern(config.projectRootRule, context), '项目');
+  const folders = new Set([root]);
+  for (const placement of walkTree(config.nodes)) {
+    if (placement.node.type !== 'folder') continue;
+    const segments = [root, ...placement.folderSegments.map((rule) => sanitizePathComponent(renderPattern(rule, context)))];
+    for (let index = 1; index <= segments.length; index += 1) folders.add(segments.slice(0, index).join('/'));
+  }
+  return [...folders];
 }
 
 export function renderArchivePath(configInput, context) {
   const config = normalizeArchiveTemplateConfig(configInput);
-  const extension = path.extname(String(context.originalName || '')).toLowerCase();
-  const directorySegments = config.directoryLevels.map((level) => sanitizePathComponent(renderPattern(level.pattern, context)));
-  const fileBase = sanitizePathComponent(renderPattern(config.fileNameRule, context), '材料文件');
-  const safeExtension = extension.replace(/[^.a-zA-Z0-9]/g, '');
-  return {
-    directorySegments,
-    directory: directorySegments.join('/'),
-    fileName: `${fileBase}${safeExtension}`
-  };
+  const extension = path.extname(String(context.originalName || '')).toLowerCase().replace(/[^.a-zA-Z0-9]/g, '');
+  if (config.version === 1) {
+    const directorySegments = config.directoryLevels.map((level) => sanitizePathComponent(renderPattern(level.pattern, context)));
+    const fileBase = sanitizePathComponent(renderPattern(config.fileNameRule, context), '材料文件');
+    return { directorySegments, directory: directorySegments.join('/'), fileName: `${fileBase}${extension}` };
+  }
+  const placement = archivePlacements(config).find((item) => item.fileTaskId === Number(context.categoryId));
+  if (!placement) return { placed: false, directorySegments: [], directory: '', fileName: '' };
+  const root = sanitizePathComponent(renderPattern(config.projectRootRule, context), '项目');
+  const directorySegments = [root, ...placement.folderSegments.map((rule) => sanitizePathComponent(renderPattern(rule, context)))];
+  const rule = placement.node.fileNameRule || config.defaultFileNameRule;
+  const fileBase = sanitizePathComponent(renderPattern(rule, context), '材料文件');
+  return { placed: true, directorySegments, directory: directorySegments.join('/'), fileName: `${fileBase}${extension}` };
 }
 
 export function archivePreview(configInput) {
-  return renderArchivePath(configInput, {
-    projectYear: 2026,
-    projectGroup: '创新组',
-    projectCode: 'CX2026-001',
-    projectTitle: '智能校园材料管理系统',
-    owner: '张同学',
-    taskName: '中期检查材料',
-    categoryName: '中期报告',
-    originalName: '中期报告终稿.docx'
-  });
+  const config = normalizeArchiveTemplateConfig(configInput);
+  const context = {
+    projectYear: 2026, projectGroup: '创新组', projectCode: 'CX2026-001',
+    projectTitle: '智能校园材料管理系统', owner: '张同学', taskName: '中期检查材料',
+    categoryName: '中期报告', categoryId: 1, originalName: '中期报告终稿.docx'
+  };
+  const preview = config.version === 1
+    ? renderArchivePath(config, context)
+    : (() => {
+      const placement = archivePlacements(config)[0];
+      const rendered = placement
+        ? renderArchivePath(config, { ...context, categoryId: placement.fileTaskId })
+        : { directory: sanitizePathComponent(renderPattern(config.projectRootRule, context), '项目'), fileName: '' };
+      return rendered;
+    })();
+  return {
+    ...preview,
+    projectRoot: config.version === 2 ? sanitizePathComponent(renderPattern(config.projectRootRule, context), '项目') : preview.directorySegments?.[0] || '',
+    entries: config.version === 2 ? archivePlacements(config).slice(0, 8).map((placement) => {
+      const rendered = renderArchivePath(config, { ...context, categoryId: placement.fileTaskId });
+      return { task: placement.node.fileTaskName || context.categoryName, directory: rendered.directory, fileName: rendered.fileName };
+    }) : []
+  };
 }
 
 export function isPathInside(rootPath, targetPath) {

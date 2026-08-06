@@ -62,6 +62,18 @@ async function removeUploadedFiles(files = []) {
 const taskTemplateUploader = createUploader('task-templates');
 const submissionUploader = createUploader('submissions');
 
+function singleSubmissionFile(req, res, next) {
+  submissionUploader.single('file')(req, res, async (error) => {
+    if (error) {
+      await removeUploadedFiles([
+        ...(req.file ? [req.file] : []),
+        ...(Array.isArray(req.files) ? req.files : [])
+      ]);
+    }
+    next(error);
+  });
+}
+
 router.post(
   '/task-templates',
   requireAuth,
@@ -126,7 +138,7 @@ router.post(
   '/submissions',
   requireAuth,
   requireRole('project_owner'),
-  submissionUploader.array('files', 20),
+  singleSubmissionFile,
   async (req, res, next) => {
     let connection;
     let transactionStarted = false;
@@ -137,8 +149,8 @@ router.post(
       if (!taskId || !projectId || !categoryId) {
         throw badRequest('taskId, projectId and categoryId are required');
       }
-      if (!req.files?.length) {
-        throw badRequest('At least one file is required');
+      if (!req.file) {
+        throw badRequest('Exactly one file is required');
       }
 
       connection = await pool.getConnection();
@@ -178,14 +190,12 @@ router.post(
       const allowedExtensions = Array.isArray(context.allowedExtensions)
         ? context.allowedExtensions
         : JSON.parse(context.allowedExtensions || '[]');
-      for (const file of req.files || []) {
-        const extension = cleanExtension(file.originalname);
-        if (allowedExtensions.length && !allowedExtensions.includes(extension)) {
-          throw badRequest(`File type .${extension} is not allowed for this task`, 'UPLOAD_TYPE_NOT_ALLOWED');
-        }
-        if (file.size > Number(context.maxFileMb) * 1024 * 1024) {
-          throw badRequest('File size exceeds the task limit', 'UPLOAD_FILE_SIZE_EXCEEDED');
-        }
+      const extension = cleanExtension(req.file.originalname);
+      if (allowedExtensions.length && !allowedExtensions.includes(extension)) {
+        throw badRequest(`File type .${extension} is not allowed for this task`, 'UPLOAD_TYPE_NOT_ALLOWED');
+      }
+      if (req.file.size > Number(context.maxFileMb) * 1024 * 1024) {
+        throw badRequest('File size exceeds the task limit', 'UPLOAD_FILE_SIZE_EXCEEDED');
       }
 
       const [[sumRow]] = await connection.execute(
@@ -197,7 +207,7 @@ router.post(
         [taskId, projectId]
       );
 
-      const newSize = (req.files || []).reduce((total, file) => total + file.size, 0);
+      const newSize = req.file.size;
       const maxTaskProjectBytes = Math.min(env.upload.maxTaskProjectBytes, Number(context.maxTaskProjectMb) * 1024 * 1024);
       if (Number(sumRow.totalSize) + newSize > maxTaskProjectBytes) {
         throw badRequest('Total upload size exceeds the task limit', 'UPLOAD_TOTAL_SIZE_EXCEEDED');
@@ -210,30 +220,27 @@ router.post(
         [taskId, projectId, categoryId, req.user.id]
       );
 
-      const files = [];
-      for (const file of req.files || []) {
-        const [fileResult] = await connection.execute(
-          `INSERT INTO material_files
-           (submission_id, original_name, storage_path, file_size, mime_type, uploaded_by)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [submissionResult.insertId, file.originalname, file.path, file.size, file.mimetype, req.user.id]
-        );
-        files.push({
-          id: fileResult.insertId,
-          originalName: file.originalname,
-          fileSize: file.size,
-          mimeType: file.mimetype
-        });
-      }
+      const [fileResult] = await connection.execute(
+        `INSERT INTO material_files
+         (submission_id, original_name, storage_path, file_size, mime_type, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [submissionResult.insertId, req.file.originalname, req.file.path, req.file.size, req.file.mimetype, req.user.id]
+      );
+      const file = {
+        id: fileResult.insertId,
+        originalName: req.file.originalname,
+        fileSize: req.file.size,
+        mimeType: req.file.mimetype
+      };
 
       await connection.commit();
       transactionStarted = false;
-      success(res, { submissionId: submissionResult.insertId, files }, 'Uploaded');
+      success(res, { submissionId: submissionResult.insertId, file }, 'Uploaded');
     } catch (error) {
       if (connection && transactionStarted) {
         await connection.rollback();
       }
-      await removeUploadedFiles(req.files);
+      await removeUploadedFiles(req.file ? [req.file] : []);
       next(error);
     } finally {
       connection?.release();

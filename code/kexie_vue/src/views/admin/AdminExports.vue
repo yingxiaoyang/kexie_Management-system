@@ -59,11 +59,11 @@
         <template #default>仅导出每项材料最新一次“审核通过”的提交版本；待审核、退回和未提交材料会进入缺失材料报告，不进入正式材料目录。</template>
       </el-alert>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="104px" class="export-scope-form">
-        <el-form-item label="归档模板" prop="archiveTemplateId"><el-select v-model="form.archiveTemplateId" filterable placeholder="选择已启用模板" style="width: 100%"><el-option v-for="item in templates" :key="item.id" :label="item.templateName" :value="item.id" /></el-select></el-form-item>
+        <el-form-item label="归档模板" prop="archiveTemplateId"><el-select v-model="form.archiveTemplateId" filterable placeholder="选择已启用模板" style="width: 100%" @change="onTemplateChange"><el-option v-for="item in templates" :key="item.id" :label="item.templateName" :value="item.id" /></el-select></el-form-item>
         <el-divider content-position="left">结构化导出范围</el-divider>
         <el-form-item label="年度"><el-select v-model="form.years" multiple collapse-tags clearable placeholder="选择年度（可多选）" style="width: 100%"><el-option v-for="year in options.years" :key="year" :label="`${year} 年`" :value="year" /></el-select></el-form-item>
         <el-form-item label="组别"><el-select v-model="form.groups" multiple collapse-tags clearable placeholder="选择组别（可多选）" style="width: 100%"><el-option v-for="group in options.groups" :key="group" :label="group" :value="group" /></el-select></el-form-item>
-        <el-form-item label="材料任务" prop="materialTaskIds"><el-select v-model="form.materialTaskIds" multiple collapse-tags filterable placeholder="至少选择一个材料任务" style="width: 100%"><el-option v-for="item in options.materialTasks" :key="item.id" :label="`${item.taskName}（${taskStatusLabel(item.status)}）`" :value="item.id" /></el-select></el-form-item>
+        <el-form-item label="统筹任务" prop="materialTaskIds"><el-select v-model="form.materialTaskIds" multiple collapse-tags filterable placeholder="模板内的统筹任务" style="width: 100%"><el-option v-for="item in filteredMaterialTasks" :key="item.id" :label="`${item.taskName}（${taskStatusLabel(item.status)}）`" :value="item.id" /></el-select><p class="table-note">只显示已放入当前归档模板的统筹任务；选择模板后默认全部选中。</p></el-form-item>
         <el-form-item label="指定项目"><el-select v-model="form.projectIds" multiple collapse-tags filterable clearable placeholder="可进一步指定项目" style="width: 100%"><el-option v-for="item in filteredProjects" :key="item.id" :label="`${item.projectCode}｜${item.title}`" :value="item.id" /></el-select></el-form-item>
         <el-form-item label="导出备注"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="可填写本次整理包用途或交接说明" /></el-form-item>
       </el-form>
@@ -119,6 +119,15 @@ const summaries = computed(() => [
   { label: '本页失败', value: records.value.filter((item) => item.exportStatus === 'failed').length },
 ])
 const filteredProjects = computed(() => options.projects.filter((item) => (!form.years.length || form.years.includes(Number(item.projectYear))) && (!form.groups.length || form.groups.includes(item.projectGroup))))
+const selectedTemplate = computed(() => templates.value.find((item) => Number(item.id) === Number(form.archiveTemplateId)))
+const filteredMaterialTasks = computed(() => {
+  const config = selectedTemplate.value?.templateConfig
+  if (!config || Number(config.version) < 2) return options.materialTasks
+  const ids = new Set()
+  const visit = (nodes) => (nodes || []).forEach((node) => { if (node.type === 'task') ids.add(Number(node.materialTaskId)); else visit(node.children) })
+  visit(config.nodes)
+  return options.materialTasks.filter((item) => ids.has(Number(item.id)))
+})
 const scopePreview = computed(() => {
   const parts = []
   if (form.years.length) parts.push(`年度 ${form.years.join('、')}`)
@@ -169,6 +178,10 @@ async function openCreate() {
   Object.assign(form, newForm())
   dialogVisible.value = true
   await loadFormOptions()
+}
+
+function onTemplateChange() {
+  form.materialTaskIds = filteredMaterialTasks.value.map((item) => Number(item.id))
 }
 
 function resetForm() {

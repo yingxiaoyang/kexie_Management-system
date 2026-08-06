@@ -6,9 +6,11 @@ import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
+  archivePlacements,
   csvText,
   isPathInside,
   normalizeArchiveTemplateConfig,
+  renderArchiveFolders,
   renderArchivePath,
   uniqueArchiveEntry
 } from '../utils/archive.js';
@@ -72,7 +74,7 @@ function missingReason(row) {
   return '没有可导出的审核通过版本';
 }
 
-async function expectedMaterials(scope) {
+async function expectedMaterials(scope, templateConfig) {
   const conditions = [
     'mt.deleted_at IS NULL',
     "mt.status IN ('published', 'closed')",
@@ -84,6 +86,9 @@ async function expectedMaterials(scope) {
   addInCondition(conditions, params, 'p.project_group', scope.groups);
   addInCondition(conditions, params, 'mt.id', scope.materialTaskIds);
   addInCondition(conditions, params, 'p.id', scope.projectIds);
+  if (templateConfig.version === 2) {
+    addInCondition(conditions, params, 'mc.id', archivePlacements(templateConfig).map((item) => item.fileTaskId));
+  }
   const [rows] = await pool.execute(
     `SELECT mt.id AS taskId, mt.task_name AS taskName,
             p.id AS projectId, p.project_year AS projectYear, p.project_group AS projectGroup,
@@ -182,6 +187,22 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
   let approvedMaterialCount = 0;
   let exportedFileCount = 0;
 
+  if (templateConfig.version === 2 && templateConfig.preserveEmptyFolders) {
+    const projects = new Map();
+    for (const row of rows) {
+      if (!projects.has(Number(row.projectId))) projects.set(Number(row.projectId), row);
+    }
+    for (const project of projects.values()) {
+      for (const folder of renderArchiveFolders(templateConfig, project)) {
+        const entryName = `${folder.replace(/\/+$/, '')}/`;
+        const key = entryName.toLocaleLowerCase();
+        if (usedEntries.has(key)) continue;
+        usedEntries.add(key);
+        zip.append('', { name: entryName });
+      }
+    }
+  }
+
   for (const row of rows) {
     if (!row.approvedSubmissionId) {
       missingRows.push([
@@ -210,6 +231,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
         continue;
       }
       const rendered = renderArchivePath(templateConfig, { ...row, originalName: file.originalName });
+      if (rendered.placed === false) continue;
       const desiredEntry = path.posix.join(...rendered.directorySegments, rendered.fileName);
       const archiveEntry = uniqueArchiveEntry(desiredEntry, usedEntries);
       zip.file(sourcePath, { name: archiveEntry });
@@ -285,7 +307,7 @@ async function processArchiveExport(exportId) {
     if (!record) return;
     const scope = normalizeScope(parseJson(record.exportScope, {}));
     const templateConfig = normalizeArchiveTemplateConfig(parseJson(record.templateSnapshot, {}));
-    const rows = await expectedMaterials(scope);
+    const rows = await expectedMaterials(scope, templateConfig);
     const submissionIds = [...new Set(rows.map((row) => Number(row.approvedSubmissionId)).filter(Boolean))];
     const fileMap = await submissionFiles(submissionIds);
     const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
@@ -396,6 +418,13 @@ router.post('/', async (req, res, next) => {
     );
     if (!template) throw notFound('Enabled archive template not found');
     const templateConfig = normalizeArchiveTemplateConfig(template.templateConfig);
+    if (templateConfig.version === 2) {
+      const placedTaskIds = new Set(archivePlacements(templateConfig).map((item) => item.materialTaskId));
+      const invalidTaskIds = scope.materialTaskIds.filter((id) => !placedTaskIds.has(id));
+      if (invalidTaskIds.length) {
+        throw badRequest('scope.materialTaskIds contains tasks not placed in this archive template', 'VALIDATION_ERROR');
+      }
+    }
     const [result] = await pool.execute(
       `INSERT INTO archive_export_records
        (export_user_id, archive_template_id, export_scope, template_snapshot, export_status, remark)
