@@ -31,7 +31,11 @@ Desktop.ini
 *.local
 ~$*
 
-# Local runtime files planned for later phases
+# Local Codex / agent workspace metadata
+.codex/
+.agents/
+
+# Local runtime files, uploaded materials and generated export ZIPs
 storage/
 uploads/
 tmp/

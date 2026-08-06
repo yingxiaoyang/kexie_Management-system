@@ -4,6 +4,8 @@ import { env } from './config/env.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/accounts.js';
+import archiveExportRoutes from './routes/archiveExports.js';
+import archiveTemplateRoutes from './routes/archiveTemplates.js';
 import healthRoutes from './routes/health.js';
 import importRoutes from './routes/imports.js';
 import importTemplateRoutes from './routes/importTemplates.js';
@@ -34,6 +36,8 @@ export function createApp() {
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/accounts', accountRoutes);
+  app.use('/api/archive-templates', archiveTemplateRoutes);
+  app.use('/api/archive-exports', archiveExportRoutes);
   app.use('/api/projects', projectRoutes);
   app.use('/api/people', peopleRoutes);
   app.use('/api/imports', importRoutes);

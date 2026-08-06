@@ -848,6 +848,102 @@ a {
   font-size: 13px;
 }
 
+.archive-config-block {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archive-level-row {
+  display: grid;
+  grid-template-columns: 68px minmax(220px, 1fr) 128px auto;
+  gap: 9px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.archive-level-index {
+  color: #526078;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: center;
+}
+
+.archive-level-actions,
+.placeholder-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.archive-level-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.archive-preview-card,
+.scope-preview-card {
+  margin-top: 8px;
+  padding: 15px 17px;
+  border: 1px solid #cbdcfb;
+  border-radius: 13px;
+  background: #f4f8ff;
+  color: #30415e;
+}
+
+.archive-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 11px;
+  color: #244b91;
+  font-weight: 800;
+}
+
+.archive-preview-line {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  margin-top: 8px;
+}
+
+.archive-preview-line > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.archive-preview-line code {
+  overflow-wrap: anywhere;
+  color: #173e7a;
+  font-family: Consolas, "Microsoft YaHei", sans-serif;
+  line-height: 1.6;
+}
+
+.archive-preview-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.is-dialog-preview {
+  margin-top: 0;
+}
+
+.export-scope-form {
+  margin-top: 18px;
+}
+
+.scope-preview-card {
+  line-height: 1.7;
+}
+
 .el-table {
   --el-table-header-bg-color: #f8fafc;
   --el-table-row-hover-bg-color: #f6f9fd;
@@ -1172,6 +1268,28 @@ a {
 
   .el-form-item__content {
     margin-left: 0 !important;
+  }
+
+  .archive-level-row {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .archive-level-row .placeholder-select,
+  .archive-level-actions {
+    grid-column: 2;
+  }
+
+  .archive-level-row .placeholder-select {
+    width: 100%;
+  }
+
+  .placeholder-toolbar .el-button {
+    margin-left: 0;
+  }
+
+  .archive-preview-line {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 }
 

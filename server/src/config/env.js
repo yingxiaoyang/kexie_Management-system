@@ -57,5 +57,8 @@ export const env = {
       'png',
       'zip'
     ])
+  },
+  archive: {
+    root: path.resolve(__dirname, '../../', process.env.EXPORT_ROOT || '../storage/exports')
   }
 };

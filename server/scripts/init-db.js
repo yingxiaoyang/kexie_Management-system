@@ -22,12 +22,29 @@ const dbConfig = {
 };
 
 async function main() {
-  const schemaPath = path.join(projectRoot, 'database', 'migrations', '001_init.sql');
-  const schemaSql = await fs.readFile(schemaPath, 'utf8');
   const connection = await mysql.createConnection(dbConfig);
 
   try {
-    await connection.query(schemaSql);
+    await connection.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      migration_name VARCHAR(255) NOT NULL,
+      applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (migration_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
+
+    const migrationsDir = path.join(projectRoot, 'database', 'migrations');
+    const migrationFiles = (await fs.readdir(migrationsDir))
+      .filter((fileName) => /^\d+_.+\.sql$/i.test(fileName))
+      .sort((left, right) => left.localeCompare(right));
+    const [appliedRows] = await connection.query('SELECT migration_name FROM schema_migrations');
+    const applied = new Set(appliedRows.map((row) => row.migration_name));
+
+    for (const migrationName of migrationFiles) {
+      if (applied.has(migrationName)) continue;
+      const migrationSql = await fs.readFile(path.join(migrationsDir, migrationName), 'utf8');
+      await connection.query(migrationSql);
+      await connection.execute('INSERT INTO schema_migrations (migration_name) VALUES (?)', [migrationName]);
+      console.log(`Applied migration: ${migrationName}`);
+    }
 
     const username = process.env.INITIAL_ADMIN_USERNAME || 'admin';
     const password = process.env.INITIAL_ADMIN_PASSWORD || 'ChangeMe123!';
@@ -43,7 +60,7 @@ async function main() {
       [username, passwordHash]
     );
 
-    console.log('Database initialized.');
+    console.log('Database initialized and migrations are up to date.');
     console.log(`Initial admin username: ${username}`);
     console.log('Initial admin password is read from INITIAL_ADMIN_PASSWORD in server/.env.');
   } finally {
