@@ -1,50 +1,45 @@
 import { computed, reactive } from 'vue'
-import { apiRequest } from '../services/http'
-
-const TOKEN_KEY = 'kexie_token'
-const USER_KEY = 'kexie_user'
-
-function storedUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || 'null')
-  } catch {
-    return null
-  }
-}
+import { apiRequest, setUnauthorizedHandler } from '../services/http'
 
 const state = reactive({
-  token: localStorage.getItem(TOKEN_KEY),
-  user: storedUser(),
+  user: null,
+  initialized: false,
 })
 
-function persist(token, user) {
-  state.token = token
+function persist(user) {
   state.user = user
-  if (token) localStorage.setItem(TOKEN_KEY, token)
-  else localStorage.removeItem(TOKEN_KEY)
-  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user))
-  else localStorage.removeItem(USER_KEY)
+  state.initialized = true
 }
+
+setUnauthorizedHandler(() => persist(null))
 
 export const authStore = {
   state,
-  isAuthenticated: computed(() => Boolean(state.token && state.user)),
+  isAuthenticated: computed(() => Boolean(state.user)),
   async login(credentials) {
     const response = await apiRequest('/auth/login', { method: 'POST', body: credentials })
-    persist(response.data.token, response.data.user)
+    persist(response.data.user)
     return response.data.user
   },
   async refreshUser() {
-    if (!state.token) return null
-    const response = await apiRequest('/auth/me')
-    persist(state.token, response.data)
-    return response.data
+    try {
+      const response = await apiRequest('/auth/me')
+      persist(response.data)
+      return response.data
+    } catch (error) {
+      persist(null)
+      throw error
+    }
   },
   updateUser(user) {
-    persist(state.token, user)
+    persist(user)
   },
-  logout() {
-    persist(null, null)
+  async logout() {
+    try {
+      await apiRequest('/auth/logout', { method: 'POST' })
+    } finally {
+      persist(null)
+    }
   },
   homeForRole(role = state.user?.role) {
     return role === 'admin' ? '/admin/dashboard' : '/owner/dashboard'

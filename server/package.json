@@ -7,7 +7,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "db:init": "node scripts/init-db.js",
-    "check": "node --check src/index.js && node --check scripts/init-db.js && node --check scripts/check-archive-flow.js && node --check scripts/check-archive-tree-flow.js && node scripts/check-modules.js",
+    "check": "node --check src/index.js && node --check scripts/init-db.js && node --check scripts/check-auth-session.js && node --check scripts/check-archive-flow.js && node --check scripts/check-archive-tree-flow.js && node scripts/check-modules.js",
+    "check:auth": "node scripts/check-auth-session.js",
     "check:archive": "node scripts/check-archive-flow.js",
     "check:archive-tree": "node scripts/check-archive-tree-flow.js"
   },

@@ -65,11 +65,11 @@ async function main() {
   }
 
   const [[admin]] = await pool.execute(
-    "SELECT id, username, role, person_id FROM users WHERE role = 'admin' AND status = 'enabled' ORDER BY id LIMIT 1"
+    "SELECT id, username, role, person_id, token_version FROM users WHERE role = 'admin' AND status = 'enabled' AND password_reset_required = 0 AND deleted_at IS NULL ORDER BY id LIMIT 1"
   );
   if (!admin) throw new Error('No enabled administrator account is available');
   const token = jwt.sign(
-    { id: admin.id, username: admin.username, role: admin.role, personId: admin.person_id },
+    { id: admin.id, username: admin.username, role: admin.role, personId: admin.person_id, tokenVersion: admin.token_version },
     env.jwt.secret,
     { expiresIn: '10m' }
   );
@@ -232,11 +232,11 @@ async function main() {
     }
 
     const [[owner]] = await pool.execute(
-      "SELECT id, username, role, person_id FROM users WHERE role = 'project_owner' AND status = 'enabled' ORDER BY id LIMIT 1"
+      "SELECT id, username, role, person_id, token_version FROM users WHERE role = 'project_owner' AND status = 'enabled' AND password_reset_required = 0 AND deleted_at IS NULL ORDER BY id LIMIT 1"
     );
     if (owner) {
       const ownerToken = jwt.sign(
-        { id: owner.id, username: owner.username, role: owner.role, personId: owner.person_id },
+        { id: owner.id, username: owner.username, role: owner.role, personId: owner.person_id, tokenVersion: owner.token_version },
         env.jwt.secret,
         { expiresIn: '10m' }
       );

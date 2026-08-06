@@ -50,8 +50,8 @@ async function submit() {
   if (!(await formRef.value?.validate().catch(() => false))) return
   loading.value = true
   try {
-    await apiRequest('/auth/change-password', { method: 'POST', body: { oldPassword: form.oldPassword, newPassword: form.newPassword } })
-    authStore.updateUser({ ...authStore.state.user, passwordResetRequired: false })
+    const response = await apiRequest('/auth/change-password', { method: 'POST', body: { oldPassword: form.oldPassword, newPassword: form.newPassword } })
+    authStore.updateUser(response.data.user)
     ElMessage.success('密码修改成功')
     await router.replace(authStore.homeForRole())
   } catch (error) {
@@ -61,8 +61,8 @@ async function submit() {
   }
 }
 
-function logout() {
-  authStore.logout()
+async function logout() {
+  await authStore.logout().catch(() => {})
   router.replace('/login')
 }
 </script>

@@ -27,9 +27,9 @@ async function waitForExport(token, exportId) {
 }
 
 async function main() {
-  const [[admin]] = await pool.execute("SELECT id, username, role, person_id FROM users WHERE role = 'admin' AND status = 'enabled' ORDER BY id LIMIT 1");
+  const [[admin]] = await pool.execute("SELECT id, username, role, person_id, token_version FROM users WHERE role = 'admin' AND status = 'enabled' AND password_reset_required = 0 AND deleted_at IS NULL ORDER BY id LIMIT 1");
   if (!admin) throw new Error('No enabled administrator account is available');
-  const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role, personId: admin.person_id }, env.jwt.secret, { expiresIn: '10m' });
+  const token = jwt.sign({ id: admin.id, username: admin.username, role: admin.role, personId: admin.person_id, tokenVersion: admin.token_version }, env.jwt.secret, { expiresIn: '10m' });
   const [rows] = await pool.execute(
     `SELECT mt.id AS taskId, mt.task_name AS taskName, mc.id AS categoryId, mc.category_name AS categoryName,
             p.id AS projectId, p.project_year AS projectYear, p.project_group AS projectGroup,

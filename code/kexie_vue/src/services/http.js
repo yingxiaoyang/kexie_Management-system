@@ -1,16 +1,13 @@
 import { buildApiUrl } from '../config/api'
 
-const TOKEN_KEY = 'kexie_token'
-const USER_KEY = 'kexie_user'
+let unauthorizedHandler = null
 
-function authHeaders() {
-  const token = localStorage.getItem(TOKEN_KEY)
-  return token ? { Authorization: `Bearer ${token}` } : {}
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler
 }
 
 function handleUnauthorized() {
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(USER_KEY)
+  unauthorizedHandler?.()
   if (window.location.pathname !== '/login') {
     window.location.assign(`/login?redirect=${encodeURIComponent(window.location.pathname)}`)
   }
@@ -24,8 +21,8 @@ export async function apiRequest(path, options = {}) {
     response = await fetch(buildApiUrl(path), {
       method,
       signal,
+      credentials: 'include',
       headers: {
-        ...authHeaders(),
         ...(isFormData ? {} : body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...headers,
       },
@@ -52,7 +49,7 @@ export async function apiRequest(path, options = {}) {
 export async function downloadFile(path, fallbackName = 'download') {
   let response
   try {
-    response = await fetch(buildApiUrl(path), { headers: authHeaders() })
+    response = await fetch(buildApiUrl(path), { credentials: 'include' })
   } catch {
     throw new Error('下载失败，请确认后端服务已启动')
   }

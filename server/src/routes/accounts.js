@@ -79,32 +79,94 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
 });
 
 router.patch('/:id/status', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
   try {
     const status = enumValue(req.body.status, ['enabled', 'disabled', 'locked'], 'status');
     if (Number(req.params.id) === Number(req.user.id) && status !== 'enabled') {
       throw badRequest('You cannot disable your own account', 'VALIDATION_ERROR');
     }
-    const [result] = await pool.execute('UPDATE users SET status = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL', [status, req.params.id]);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
+      'UPDATE users SET status = ?, token_version = token_version + 1, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL',
+      [status, req.params.id]
+    );
     if (!result.affectedRows) throw notFound('Account not found');
+    await connection.execute(
+      `UPDATE people pe JOIN users u ON u.person_id = pe.id
+       SET pe.account_status = ? WHERE u.id = ?`,
+      [status === 'enabled' ? 'enabled' : 'disabled', req.params.id]
+    );
+    await connection.commit();
     success(res, null, 'Account status updated');
   } catch (error) {
+    if (connection) await connection.rollback();
     next(error);
+  } finally {
+    connection?.release();
   }
 });
 
 router.post('/:id/reset-password', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
   try {
     const password = req.body.initialPassword || initialPassword();
     if (String(password).length < 8) throw badRequest('Password must be at least 8 characters', 'VALIDATION_ERROR');
     const hash = await bcrypt.hash(String(password), 12);
-    const [result] = await pool.execute(
-      'UPDATE users SET password_hash = ?, password_reset_required = 1, status = \'enabled\', updated_at = NOW() WHERE id = ? AND deleted_at IS NULL',
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
+      `UPDATE users
+       SET password_hash = ?, password_reset_required = 1, status = 'enabled',
+           token_version = token_version + 1, updated_at = NOW()
+       WHERE id = ? AND deleted_at IS NULL`,
       [hash, req.params.id]
     );
     if (!result.affectedRows) throw notFound('Account not found');
+    await connection.execute(
+      `UPDATE people pe JOIN users u ON u.person_id = pe.id
+       SET pe.account_status = 'enabled' WHERE u.id = ?`,
+      [req.params.id]
+    );
+    await connection.commit();
     success(res, { initialPassword: password }, 'Password reset');
   } catch (error) {
+    if (connection) await connection.rollback();
     next(error);
+  } finally {
+    connection?.release();
+  }
+});
+
+router.delete('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
+  try {
+    if (Number(req.params.id) === Number(req.user.id)) {
+      throw badRequest('You cannot delete your own account', 'VALIDATION_ERROR');
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [[user]] = await connection.execute(
+      'SELECT id, person_id FROM users WHERE id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE',
+      [req.params.id]
+    );
+    if (!user) throw notFound('Account not found');
+    await connection.execute(
+      `UPDATE users
+       SET status = 'disabled', token_version = token_version + 1, deleted_at = NOW(), updated_at = NOW()
+       WHERE id = ?`,
+      [req.params.id]
+    );
+    if (user.person_id) {
+      await connection.execute("UPDATE people SET account_status = 'none' WHERE id = ?", [user.person_id]);
+    }
+    await connection.commit();
+    success(res, null, 'Account deleted');
+  } catch (error) {
+    if (connection) await connection.rollback();
+    next(error);
+  } finally {
+    connection?.release();
   }
 });
 

@@ -95,9 +95,9 @@ const OwnerMenu = defineComponent({
   },
 })
 
-function logout() {
+async function logout() {
   drawerVisible.value = false
-  authStore.logout()
+  await authStore.logout().catch(() => {})
   router.replace('/login')
 }
 </script>

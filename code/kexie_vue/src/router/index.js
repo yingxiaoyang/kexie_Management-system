@@ -41,14 +41,19 @@ const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(async (to) => {
   if (to.meta.public) {
+    if (!authStore.state.initialized) {
+      try {
+        await authStore.refreshUser()
+      } catch {
+        // No active HttpOnly Cookie session.
+      }
+    }
     return authStore.isAuthenticated.value ? authStore.homeForRole() : true
   }
-  if (!authStore.state.token) return { path: '/login', query: { redirect: to.fullPath } }
-  if (!authStore.state.user) {
+  if (!authStore.state.initialized || !authStore.state.user) {
     try {
       await authStore.refreshUser()
     } catch {
-      authStore.logout()
       return { path: '/login', query: { redirect: to.fullPath } }
     }
   }

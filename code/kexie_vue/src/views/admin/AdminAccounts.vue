@@ -12,7 +12,7 @@
         <el-table-column prop="role" label="角色" width="140"><template #default="{ row }">{{ row.role === 'admin' ? '管理员' : '项目负责人' }}</template></el-table-column>
         <el-table-column prop="status" label="状态" width="110"><template #default="{ row }"><el-tag :type="row.status === 'enabled' ? 'success' : 'info'">{{ statusLabel(row.status) }}</el-tag></template></el-table-column>
         <el-table-column label="首次改密" width="100"><template #default="{ row }"><el-tag v-if="row.passwordResetRequired" type="warning">待修改</el-tag><span v-else>已完成</span></template></el-table-column>
-        <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button text @click="resetPassword(row)">重置密码</el-button><el-button text :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></template></el-table-column>
+        <el-table-column label="操作" width="270" fixed="right"><template #default="{ row }"><el-button text @click="resetPassword(row)">重置密码</el-button><el-button text :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button><el-button text type="danger" :disabled="row.id === authStore.state.user?.id" @click="deleteAccount(row)">删除</el-button></template></el-table-column>
       </el-table>
       <div class="mobile-card-list">
         <el-empty v-if="!accounts.length && !loading" class="empty-mobile" description="暂无账号数据" :image-size="72" />
@@ -25,7 +25,7 @@
             <div><span class="mobile-field-label">首次改密</span><span class="mobile-field-value">{{ row.passwordResetRequired ? '待修改' : '已完成' }}</span></div>
             <div><span class="mobile-field-label">账号状态</span><span class="mobile-field-value">{{ statusLabel(row.status) }}</span></div>
           </div>
-          <div class="mobile-card-footer"><el-button @click="resetPassword(row)">重置密码</el-button><el-button :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button></div>
+          <div class="mobile-card-footer"><el-button @click="resetPassword(row)">重置密码</el-button><el-button :disabled="row.id === authStore.state.user?.id" @click="toggleStatus(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</el-button><el-button type="danger" plain :disabled="row.id === authStore.state.user?.id" @click="deleteAccount(row)">删除</el-button></div>
         </article>
       </div>
       <div class="pagination-row" v-if="pagination.total"><el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadAccounts" /></div>
@@ -70,6 +70,7 @@ watch(() => form.personId, (id) => { const person = personOptions.value.find((it
 async function createAccount() { if (!(await formRef.value?.validate().catch(() => false))) return; saving.value = true; try { const r = await apiRequest('/accounts', { method: 'POST', body: form }); issuedPassword.value = r.data.initialPassword; dialogVisible.value = false; passwordVisible.value = true; await loadAccounts() } catch (e) { ElMessage.error(e.message) } finally { saving.value = false } }
 async function resetPassword(row) { try { await ElMessageBox.confirm(`确认重置“${row.displayName}”的密码吗？`, '重置密码', { type: 'warning' }); const r = await apiRequest(`/accounts/${row.id}/reset-password`, { method: 'POST', body: {} }); issuedPassword.value = r.data.initialPassword; passwordVisible.value = true; await loadAccounts() } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || '重置失败') } }
 async function toggleStatus(row) { try { await apiRequest(`/accounts/${row.id}/status`, { method: 'PATCH', body: { status: row.status === 'enabled' ? 'disabled' : 'enabled' } }); ElMessage.success('账号状态已更新'); await loadAccounts() } catch (e) { ElMessage.error(e.message) } }
+async function deleteAccount(row) { try { await ElMessageBox.confirm(`删除后“${row.displayName}”将无法登录，旧会话也会立即失效。确认删除吗？`, '删除账号', { type: 'warning', confirmButtonText: '确认删除', confirmButtonClass: 'el-button--danger' }); await apiRequest(`/accounts/${row.id}`, { method: 'DELETE' }); ElMessage.success('账号已删除'); await loadAccounts() } catch (e) { if (e !== 'cancel') ElMessage.error(e.message || '删除失败') } }
 async function copyPassword() { await navigator.clipboard.writeText(issuedPassword.value); ElMessage.success('密码已复制') }
 onMounted(loadAccounts)
 </script>

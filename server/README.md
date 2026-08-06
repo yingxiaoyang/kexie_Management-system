@@ -14,7 +14,7 @@ D:\kexiexitong\server
 - Express
 - MySQL 8.4
 - mysql2
-- JWT 登录
+- JWT + HttpOnly Cookie 登录
 - multer 本地文件上传
 
 ## 2. 本地启动
@@ -71,6 +71,7 @@ DB_NAME=kexie_db
 DB_USER=kexie_user
 DB_PASSWORD=<数据库密码>
 JWT_SECRET=<登录令牌密钥>
+AUTH_COOKIE_NAME=kexie_session
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 UPLOAD_ROOT=../storage/uploads
 MAX_UPLOAD_FILE_MB=50
@@ -85,6 +86,7 @@ ALLOWED_UPLOAD_EXTENSIONS=pdf,doc,docx,xls,xlsx,ppt,pptx,jpg,jpeg,png,zip
 - 管理员账号可以有多个，第一版管理员权限一致。
 - 项目负责人账号由管理员创建，并生成初始密码。
 - `password_reset_required=1` 表示首次登录或重置后必须改密。
+- `token_version` 用于让停用、删除、改密、重置和退出前的旧会话立即失效。
 - 负责人忘记密码时，由管理员重置密码。
 
 ## 5. 文件上传
@@ -108,6 +110,7 @@ D:\kexiexitong\storage\uploads
 - `POST /api/auth/login`：登录。
 - `GET /api/auth/me`：当前登录用户。
 - `POST /api/auth/change-password`：修改密码。
+- `POST /api/auth/logout`：退出并使旧会话失效。
 - `POST /api/uploads/task-templates`：管理员上传材料任务模板附件。
 - `POST /api/uploads/submissions`：负责人上传材料。
 - `GET /api/material-tasks/:taskId/templates`：查看任务模板附件。
