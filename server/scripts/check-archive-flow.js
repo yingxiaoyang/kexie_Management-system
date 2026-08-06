@@ -204,8 +204,8 @@ async function main() {
     if (!missingCheck.record.exportSummary?.missingReportIncluded || missingCheck.record.exportSummary.missingCount < 1) {
       throw new Error('Missing material report was not generated');
     }
-    if (!missingCheck.archiveBuffer.includes(Buffer.from('缺失材料报告.csv'))) {
-      throw new Error('ZIP does not contain 缺失材料报告.csv');
+    if (!missingCheck.archiveBuffer.includes(Buffer.from('缺失材料报告.xlsx'))) {
+      throw new Error('ZIP does not contain 缺失材料报告.xlsx');
     }
     const emptyScopeCheck = await createAndWaitForExport(token, {
       archiveTemplateId: template.id,
@@ -220,7 +220,7 @@ async function main() {
     if (emptyScopeCheck.record.exportSummary?.expectedMaterialCount !== 0
       || !emptyScopeCheck.record.exportSummary?.missingReportIncluded
       || emptyScopeCheck.record.exportSummary?.missingCount !== 1
-      || !emptyScopeCheck.archiveBuffer.includes(Buffer.from('缺失材料报告.csv'))) {
+      || !emptyScopeCheck.archiveBuffer.includes(Buffer.from('缺失材料报告.xlsx'))) {
       throw new Error('Empty structured scope did not produce an explicit missing report');
     }
     const downloadResponse = await fetch(`${apiBase}/archive-exports/${approvedCheck.exportId}/download`, {

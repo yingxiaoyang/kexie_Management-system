@@ -213,7 +213,7 @@ async function showTemplates(row) {
   templatesVisible.value = true
   templatesLoading.value = true
   try {
-    templates.value = (await apiRequest(`/material-tasks/${row.taskId}/templates`)).data
+    templates.value = (await apiRequest(`/material-tasks/${row.taskId}/templates?categoryId=${row.categoryId}`)).data
   } catch (error) {
     ElMessage.error(error.message)
   } finally {

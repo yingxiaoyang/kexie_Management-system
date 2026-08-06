@@ -89,12 +89,12 @@
 
       <div class="archive-options-row"><el-switch v-model="form.preserveEmptyFolders" active-text="保留模板中的空文件夹" /><span>关闭时，只创建实际含审核通过文件的目录。</span></div>
       <section class="archive-preview-card" aria-live="polite">
-        <div class="archive-preview-title"><el-icon><View /></el-icon>保存前示例目录树</div>
-        <div class="preview-tree-lines"><code v-for="line in previewLines" :key="line">{{ line }}</code><span v-if="!previewLines.length" class="muted">请先放置至少一个子文件任务</span></div>
-        <p>示例项目：CX2026-001 - 智能校园材料管理系统。文件扩展名沿用负责人提交的原文件。</p>
+        <div class="archive-preview-title"><el-icon><View /></el-icon>实时目录预览</div>
+        <div class="preview-tree-lines"><code v-for="line in previewLines" :key="line">{{ line }}</code></div>
+        <p>{{ assignedTaskIds.size ? '目录和文件名会随上方规则实时变化；文件扩展名沿用负责人提交的原文件。' : '已实时显示项目根目录和文件夹；从右侧放入子任务后会继续显示文件名。' }}</p>
       </section>
 
-      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveTemplate">确认示例并保存</el-button></template>
+      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveTemplate">确认预览并保存</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="previewDialogVisible" title="模板目录树预览" width="760px">
@@ -195,7 +195,6 @@ function previewEntries(nodes, folders = [], lines = []) {
   return lines
 }
 const previewLines = computed(() => {
-  if (!assignedTaskIds.value.size) return []
   const rows = [`${renderPattern(form.projectRootRule)}/`]
   for (const item of previewEntries(form.nodes)) rows.push(`${'  '.repeat(item.depth)}${item.text}`)
   return rows

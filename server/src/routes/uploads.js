@@ -84,6 +84,7 @@ router.post(
     let transactionStarted = false;
     try {
       const taskId = Number(req.body.taskId);
+      const categoryId = Number(req.body.categoryId || 0) || null;
       if (!taskId) {
         throw badRequest('taskId is required');
       }
@@ -96,20 +97,24 @@ router.post(
       transactionStarted = true;
 
       const [[task]] = await connection.execute(
-        'SELECT id FROM material_tasks WHERE id = ? AND deleted_at IS NULL LIMIT 1',
-        [taskId]
+        `SELECT mt.id, mc.id AS categoryId
+         FROM material_tasks mt
+         LEFT JOIN material_categories mc ON mc.id = ? AND mc.material_task_id = mt.id AND mc.deleted_at IS NULL
+         WHERE mt.id = ? AND mt.deleted_at IS NULL LIMIT 1`,
+        [categoryId, taskId]
       );
       if (!task) {
         throw notFound('Material task not found');
       }
+      if (categoryId && !task.categoryId) throw notFound('File task not found');
 
       const savedFiles = [];
       for (const file of req.files || []) {
         const [result] = await connection.execute(
           `INSERT INTO task_template_attachments
-           (material_task_id, original_name, storage_path, file_size, mime_type, uploaded_by)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [taskId, file.originalname, file.path, file.size, file.mimetype, req.user.id]
+           (material_task_id, material_category_id, original_name, storage_path, file_size, mime_type, uploaded_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [taskId, categoryId, file.originalname, file.path, file.size, file.mimetype, req.user.id]
         );
         savedFiles.push({
           id: result.insertId,
@@ -118,6 +123,11 @@ router.post(
           mimeType: file.mimetype
         });
       }
+
+      if (categoryId) {
+        await connection.execute('UPDATE material_categories SET has_template = 1, updated_at = NOW() WHERE id = ?', [categoryId]);
+      }
+      await connection.execute('UPDATE material_tasks SET has_template = 1, updated_at = NOW() WHERE id = ?', [taskId]);
 
       await connection.commit();
       transactionStarted = false;
@@ -160,7 +170,8 @@ router.post(
       const [[context]] = await connection.execute(
         `SELECT mt.id AS taskId, mt.status AS taskStatus, mt.project_scope_type AS scopeType,
                 mt.project_year AS taskYear, mt.project_group AS taskGroup,
-                mt.allowed_extensions AS allowedExtensions, mt.max_file_mb AS maxFileMb,
+                COALESCE(mc.allowed_extensions, mt.allowed_extensions) AS allowedExtensions,
+                COALESCE(mc.max_file_mb, mt.max_file_mb) AS maxFileMb,
                 mt.max_task_project_mb AS maxTaskProjectMb,
                 p.project_year AS projectYear, p.project_group AS projectGroup,
                 mc.id AS categoryId,

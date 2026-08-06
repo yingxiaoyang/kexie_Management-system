@@ -976,6 +976,67 @@ a {
   line-height: 1.5;
 }
 
+.task-scope-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #36577f;
+  line-height: 1.6;
+}
+
+.file-task-config-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+
+.file-task-config-head {
+  display: grid;
+  grid-template-columns: 30px minmax(240px, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.file-task-rule-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(150px, 0.65fr) minmax(190px, 0.75fr);
+  gap: 10px;
+}
+
+.file-task-rule-block {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e3eaf4;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.file-task-rule-label {
+  display: block;
+  margin-bottom: 7px;
+  color: #4d6078;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.existing-template-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.material-task-dialog .el-dialog__body {
+  max-height: 76vh;
+  overflow-y: auto;
+}
+
 .file-task-row {
   display: grid;
   grid-template-columns: 32px minmax(260px, 1fr) auto 112px;
@@ -1653,8 +1714,21 @@ a {
 
   .archive-basic-form,
   .file-task-row,
-  .file-task-fields {
+  .file-task-fields,
+  .file-task-rule-grid {
     grid-template-columns: 1fr;
+  }
+
+  .file-task-config-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .file-task-config-head .file-task-order {
+    display: none;
+  }
+
+  .file-task-config-head > .el-input {
+    grid-column: 1 / -1;
   }
 
   .file-task-order {

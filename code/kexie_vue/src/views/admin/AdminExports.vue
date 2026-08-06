@@ -79,7 +79,7 @@
         <el-descriptions-item label="状态"><el-tag :type="statusType(selectedRecord.exportStatus)">{{ statusLabel(selectedRecord.exportStatus) }}</el-tag></el-descriptions-item>
         <el-descriptions-item label="统计摘要"><template v-if="selectedRecord.exportSummary">应收 {{ selectedRecord.exportSummary.expectedMaterialCount }} 项；含通过材料 {{ selectedRecord.exportSummary.approvedMaterialCount }} 项；导出 {{ selectedRecord.exportSummary.exportedFileCount }} 个文件；缺失 {{ selectedRecord.exportSummary.missingCount }} 条。</template><template v-else>生成完成后显示</template></el-descriptions-item>
         <el-descriptions-item v-if="selectedRecord.failureReason" label="失败原因"><span class="danger-text">{{ selectedRecord.failureReason }}</span></el-descriptions-item>
-        <el-descriptions-item label="缺失报告">{{ selectedRecord.exportSummary?.missingReportIncluded ? 'ZIP 内已生成“缺失材料报告.csv”' : '没有缺失项' }}</el-descriptions-item>
+        <el-descriptions-item label="缺失报告">{{ selectedRecord.exportSummary?.missingReportIncluded ? 'ZIP 内已生成“缺失材料报告.xlsx”' : '没有缺失项' }}</el-descriptions-item>
         <el-descriptions-item label="备注">{{ selectedRecord.remark || '无' }}</el-descriptions-item>
         <el-descriptions-item label="创建 / 完成">{{ formatTime(selectedRecord.createdAt) }} / {{ formatTime(selectedRecord.finishedAt) }}</el-descriptions-item>
       </el-descriptions>

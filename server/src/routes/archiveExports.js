@@ -7,12 +7,12 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   archivePlacements,
-  csvText,
   isPathInside,
   normalizeArchiveTemplateConfig,
   renderArchiveFolders,
   renderArchivePath,
-  uniqueArchiveEntry
+  uniqueArchiveEntry,
+  xlsxBuffer
 } from '../utils/archive.js';
 import { badRequest, forbidden, notFound } from '../utils/errors.js';
 import { paginationFrom } from '../utils/query.js';
@@ -95,6 +95,7 @@ async function expectedMaterials(scope, templateConfig) {
             p.project_code AS projectCode, p.title AS projectTitle,
             mc.id AS categoryId, mc.category_name AS categoryName,
             COALESCE(owners.ownerNames, '未登记负责人') AS owner,
+            COALESCE(owners.ownerPhones, '未登记电话') AS ownerPhone,
             approved.id AS approvedSubmissionId, approved.reviewed_at AS approvedAt,
             latest.id AS latestSubmissionId, latest.review_status AS latestReviewStatus,
             latest.return_reason AS latestReturnReason
@@ -111,7 +112,8 @@ async function expectedMaterials(scope, templateConfig) {
      )
      LEFT JOIN (
        SELECT pp.project_id,
-              GROUP_CONCAT(pe.name ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerNames
+              GROUP_CONCAT(pe.name ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerNames,
+              GROUP_CONCAT(COALESCE(NULLIF(pe.phone, ''), '未登记电话') ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerPhones
        FROM project_participations pp
        JOIN people pe ON pe.id = pp.person_id AND pe.deleted_at IS NULL
        WHERE pp.role = 'owner' AND pp.deleted_at IS NULL
@@ -206,7 +208,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
   for (const row of rows) {
     if (!row.approvedSubmissionId) {
       missingRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner,
+        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, missingReason(row)
       ]);
       continue;
@@ -217,7 +219,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       const sourcePath = path.resolve(String(file.storagePath || ''));
       if (!isPathInside(env.upload.root, sourcePath)) {
         missingRows.push([
-          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner,
+          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
           row.taskName, row.categoryName, `审核通过版本的文件路径不在系统上传目录：${file.originalName}`
         ]);
         continue;
@@ -225,7 +227,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       const stat = await fs.promises.stat(sourcePath).catch(() => null);
       if (!stat?.isFile()) {
         missingRows.push([
-          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner,
+          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
           row.taskName, row.categoryName, `审核通过版本的文件不存在：${file.originalName}`
         ]);
         continue;
@@ -238,7 +240,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       materialFileCount += 1;
       exportedFileCount += 1;
       exportedRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner,
+        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, file.originalName, archiveEntry,
         row.approvedSubmissionId, row.approvedAt || ''
       ]);
@@ -246,26 +248,28 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     if (materialFileCount) approvedMaterialCount += 1;
     if (!files.length) {
       missingRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner,
+        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, '审核通过版本没有关联文件'
       ]);
     }
   }
 
   if (!rows.length) {
-    missingRows.push(['', '', '', '', '', '', '', '导出范围内没有匹配的材料任务、项目或材料类别']);
+    missingRows.push(['', '', '', '', '', '', '', '', '导出范围内没有匹配的材料任务、项目或材料类别']);
   }
 
-  zip.append(csvText(
-    ['年度', '组别', '项目编号', '作品名称', '负责人', '材料任务', '材料类别', '原文件名', 'ZIP 内路径', '提交版本ID', '审核通过时间'],
-    exportedRows
-  ), { name: uniqueArchiveEntry('导出材料清单.csv', usedEntries) });
+  zip.append(xlsxBuffer(
+    ['年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '原文件名', 'ZIP 内路径', '提交版本ID', '审核通过时间'],
+    exportedRows,
+    '导出材料清单'
+  ), { name: uniqueArchiveEntry('导出材料清单.xlsx', usedEntries) });
 
   if (missingRows.length) {
-    zip.append(csvText(
-      ['年度', '组别', '项目编号', '作品名称', '负责人', '材料任务', '材料类别', '缺失原因'],
-      missingRows
-    ), { name: uniqueArchiveEntry('缺失材料报告.csv', usedEntries) });
+    zip.append(xlsxBuffer(
+      ['年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '缺失原因'],
+      missingRows,
+      '缺失材料报告'
+    ), { name: uniqueArchiveEntry('缺失材料报告.xlsx', usedEntries) });
   }
 
   const summaryLines = [

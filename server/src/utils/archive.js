@@ -1,4 +1,5 @@
 import path from 'node:path';
+import XLSX from 'xlsx';
 import { badRequest } from './errors.js';
 
 export const ARCHIVE_PLACEHOLDERS = [
@@ -254,4 +255,15 @@ export function uniqueArchiveEntry(entryName, usedEntries) {
 export function csvText(headers, rows) {
   const escapeCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
   return `\ufeff${[headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\r\n')}`;
+}
+
+export function xlsxBuffer(headers, rows, sheetName = '数据') {
+  const data = [headers, ...rows];
+  const worksheet = XLSX.utils.aoa_to_sheet(data);
+  worksheet['!cols'] = headers.map((_header, columnIndex) => ({
+    wch: Math.min(50, Math.max(12, ...data.map((row) => String(row[columnIndex] ?? '').length + 2)))
+  }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, String(sheetName || '数据').slice(0, 31));
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx', compression: true });
 }

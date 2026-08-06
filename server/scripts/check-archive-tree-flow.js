@@ -112,7 +112,7 @@ async function main() {
     const rendered = renderArchivePath(templateConfig, { ...target, originalName: target.originalName || '未提交材料.docx' });
     const expectedDirectory = rendered.directory;
     if (!zipBuffer.includes(Buffer.from(expectedDirectory))) throw new Error(`ZIP does not contain expected project tree: ${expectedDirectory}`);
-    if (!target.approvedSubmissionId && !zipBuffer.includes(Buffer.from('缺失材料报告.csv'))) throw new Error('Missing report is absent from tree archive ZIP');
+    if (!target.approvedSubmissionId && !zipBuffer.includes(Buffer.from('缺失材料报告.xlsx'))) throw new Error('Missing report is absent from tree archive ZIP');
     console.log(JSON.stringify({ templateVersion: 2, projectRoot: preview.projectRoot, sampleDirectory: preview.entries[0].directory, exportStatus: record.exportStatus, exportSummary: record.exportSummary }, null, 2));
   } finally {
     if (exportId) await pool.execute('DELETE FROM archive_export_records WHERE id = ?', [exportId]);
