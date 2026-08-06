@@ -1,8 +1,10 @@
-import path from 'node:path';
 import { Router } from 'express';
+import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { archivePlacements, normalizeArchiveTemplateConfig } from '../utils/archive.js';
+import { ensureMaterialTaskAccess } from '../utils/accessControl.js';
+import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
@@ -11,6 +13,15 @@ const router = Router();
 const taskStatuses = ['draft', 'published', 'closed'];
 const scopeTypes = ['all', 'year', 'group', 'custom'];
 const defaultExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip'];
+
+function optionalPositiveInteger(value, fieldName) {
+  if (value == null || value === '') return null;
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue < 1) {
+    throw badRequest(`${fieldName} is invalid`, 'VALIDATION_ERROR');
+  }
+  return numberValue;
+}
 
 function normalizedExtensions(value, fallback = defaultExtensions) {
   const source = Array.isArray(value) && value.length ? value : fallback;
@@ -427,7 +438,11 @@ router.patch('/:id/status', requireAuth, requireRole('admin'), async (req, res, 
 
 router.get('/:taskId/templates', requireAuth, async (req, res, next) => {
   try {
-    const categoryId = Number(req.query.categoryId || 0);
+    const categoryId = optionalPositiveInteger(req.query.categoryId, 'categoryId');
+    await ensureMaterialTaskAccess(req.user, req.params.taskId, {
+      categoryId,
+      requireReleasedForOwner: true
+    });
     const conditions = ['material_task_id = ?', 'deleted_at IS NULL'];
     const params = [req.params.taskId];
     if (categoryId) {
@@ -454,7 +469,7 @@ router.get('/:taskId/templates', requireAuth, async (req, res, next) => {
 router.get('/:taskId/templates/:attachmentId/download', requireAuth, async (req, res, next) => {
   try {
     const [rows] = await pool.execute(
-      `SELECT tta.original_name, tta.storage_path
+      `SELECT tta.original_name, tta.storage_path, tta.material_category_id AS categoryId
        FROM task_template_attachments tta
        LEFT JOIN material_categories mc ON mc.id = tta.material_category_id
        JOIN material_tasks mt ON mt.id = tta.material_task_id
@@ -466,7 +481,16 @@ router.get('/:taskId/templates/:attachmentId/download', requireAuth, async (req,
     );
     const attachment = rows[0];
     if (!attachment) throw notFound('Template attachment not found');
-    res.download(path.resolve(attachment.storage_path), attachment.original_name);
+    await ensureMaterialTaskAccess(req.user, req.params.taskId, {
+      categoryId: attachment.categoryId || null,
+      requireReleasedForOwner: true
+    });
+    const filePath = await resolveDownloadFile(env.upload.root, attachment.storage_path, {
+      invalidMessage: 'Template file path is outside the system upload directory',
+      invalidCode: 'TEMPLATE_FILE_PATH_INVALID',
+      missingMessage: 'Template file not found'
+    });
+    res.download(filePath, attachment.original_name);
   } catch (error) {
     next(error);
   }

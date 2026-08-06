@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { notFound } from '../utils/errors.js';
+import { resolveDownloadFile } from '../utils/safeFiles.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,13 +20,19 @@ const files = {
 
 const router = Router();
 
-router.get('/:type/download', requireAuth, requireRole('admin'), (req, res, next) => {
-  const fileName = files[req.params.type];
-  if (!fileName) {
-    next(notFound('Import template not found'));
-    return;
+router.get('/:type/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+  try {
+    const fileName = files[req.params.type];
+    if (!fileName) throw notFound('Import template not found');
+    const filePath = await resolveDownloadFile(templateDir, fileName, {
+      invalidMessage: 'Import template path is outside the system template directory',
+      invalidCode: 'IMPORT_TEMPLATE_PATH_INVALID',
+      missingMessage: 'Import template not found'
+    });
+    res.download(filePath, fileName);
+  } catch (error) {
+    next(error);
   }
-  res.download(path.join(templateDir, fileName), fileName);
 });
 
 export default router;

@@ -1,8 +1,10 @@
-import path from 'node:path';
 import { Router } from 'express';
+import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { badRequest, forbidden, notFound } from '../utils/errors.js';
+import { ensureSubmissionAccess } from '../utils/accessControl.js';
+import { resolveDownloadFile } from '../utils/safeFiles.js';
+import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom } from '../utils/query.js';
 import { success } from '../utils/response.js';
 
@@ -85,6 +87,7 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), async (req, res, 
 
 router.get('/:id/files', requireAuth, async (req, res, next) => {
   try {
+    await ensureSubmissionAccess(req.user, req.params.id);
     const [items] = await pool.execute(
       `SELECT mf.id, mf.original_name AS originalName, mf.file_size AS fileSize, mf.mime_type AS mimeType, mf.created_at AS createdAt
        FROM material_files mf JOIN material_submissions ms ON ms.id = mf.submission_id
@@ -99,22 +102,21 @@ router.get('/:id/files', requireAuth, async (req, res, next) => {
 
 router.get('/:submissionId/files/:fileId/download', requireAuth, async (req, res, next) => {
   try {
+    await ensureSubmissionAccess(req.user, req.params.submissionId);
     const [rows] = await pool.execute(
-      `SELECT mf.original_name, mf.storage_path, ms.project_id
+      `SELECT mf.original_name, mf.storage_path
        FROM material_files mf JOIN material_submissions ms ON ms.id = mf.submission_id
        WHERE mf.id = ? AND mf.submission_id = ? AND mf.deleted_at IS NULL AND ms.deleted_at IS NULL LIMIT 1`,
       [req.params.fileId, req.params.submissionId]
     );
     const file = rows[0];
     if (!file) throw notFound('File not found');
-    if (req.user.role === 'project_owner') {
-      const [[allowed]] = await pool.execute(
-        `SELECT 1 FROM project_participations WHERE project_id = ? AND person_id = ? AND role = 'owner' AND deleted_at IS NULL LIMIT 1`,
-        [file.project_id, req.user.personId || 0]
-      );
-      if (!allowed) throw forbidden('No permission to download this file');
-    }
-    res.download(path.resolve(file.storage_path), file.original_name);
+    const filePath = await resolveDownloadFile(env.upload.root, file.storage_path, {
+      invalidMessage: 'Submission file path is outside the system upload directory',
+      invalidCode: 'SUBMISSION_FILE_PATH_INVALID',
+      missingMessage: 'Submission file not found'
+    });
+    res.download(filePath, file.original_name);
   } catch (error) {
     next(error);
   }

@@ -7,14 +7,14 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   archivePlacements,
-  isPathInside,
   normalizeArchiveTemplateConfig,
   renderArchiveFolders,
   renderArchivePath,
   uniqueArchiveEntry,
   xlsxBuffer
 } from '../utils/archive.js';
-import { badRequest, forbidden, notFound } from '../utils/errors.js';
+import { resolveDownloadFile } from '../utils/safeFiles.js';
+import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom } from '../utils/query.js';
 import { success } from '../utils/response.js';
 
@@ -266,19 +266,20 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     const files = fileMap.get(Number(row.approvedSubmissionId)) || [];
     let materialFileCount = 0;
     for (const file of files) {
-      const sourcePath = path.resolve(String(file.storagePath || ''));
-      if (!isPathInside(env.upload.root, sourcePath)) {
+      let sourcePath;
+      try {
+        sourcePath = await resolveDownloadFile(env.upload.root, file.storagePath, {
+          invalidMessage: 'Submission file path is outside the system upload directory',
+          invalidCode: 'SUBMISSION_FILE_PATH_INVALID',
+          missingMessage: 'Submission file not found'
+        });
+      } catch (error) {
+        const reason = error?.code === 'SUBMISSION_FILE_PATH_INVALID'
+          ? `审核通过版本的文件路径不在系统上传目录：${file.originalName}`
+          : `审核通过版本的文件不存在：${file.originalName}`;
         missingRows.push([
           row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
-          row.taskName, row.categoryName, `审核通过版本的文件路径不在系统上传目录：${file.originalName}`
-        ]);
-        continue;
-      }
-      const stat = await fs.promises.stat(sourcePath).catch(() => null);
-      if (!stat?.isFile()) {
-        missingRows.push([
-          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
-          row.taskName, row.categoryName, `审核通过版本的文件不存在：${file.originalName}`
+          row.taskName, row.categoryName, reason
         ]);
         continue;
       }
@@ -525,12 +526,11 @@ router.get('/:id/download', async (req, res, next) => {
     if (record.exportStatus !== 'success' || !record.exportFilePath) {
       throw badRequest('Archive export is not ready for download', 'EXPORT_NOT_READY');
     }
-    const filePath = path.resolve(record.exportFilePath);
-    if (!isPathInside(env.archive.root, filePath)) {
-      throw forbidden('Export file path is outside the system export directory', 'EXPORT_PATH_INVALID');
-    }
-    const stat = await fs.promises.stat(filePath).catch(() => null);
-    if (!stat?.isFile()) throw notFound('Archive export file not found');
+    const filePath = await resolveDownloadFile(env.archive.root, record.exportFilePath, {
+      invalidMessage: 'Export file path is outside the system export directory',
+      invalidCode: 'EXPORT_PATH_INVALID',
+      missingMessage: 'Archive export file not found'
+    });
     res.download(filePath, path.basename(filePath));
   } catch (error) {
     next(error);
