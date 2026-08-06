@@ -3,7 +3,11 @@ import XLSX from 'xlsx';
 import { badRequest } from './errors.js';
 
 export const ARCHIVE_PLACEHOLDERS = [
-  '年度', '组别', '项目编号', '作品名称', '负责人', '材料任务', '材料类别', '原文件名'
+  '项目序号', '项目序号两位', '项目序号三位', '材料序号', '材料序号两位',
+  '年度', '组别', '项目编号', '作品名称', '项目类别', '立项日期',
+  '负责人', '负责人学号工号', '负责人学院单位', '负责人电话', '项目成员', '指导教师',
+  '材料任务', '材料类别', '原文件名', '原扩展名', '提交日期', '审核通过日期',
+  '导出日期', '导出批次'
 ];
 
 export const DEFAULT_ARCHIVE_CONFIG = {
@@ -125,18 +129,53 @@ export function sanitizePathComponent(value, fallback = '未命名') {
   return result || fallback;
 }
 
+function sequenceText(value, width = 0) {
+  const sequence = Math.max(1, Number(value) || 1);
+  return width ? String(sequence).padStart(width, '0') : String(sequence);
+}
+
+function dateText(value, fallback = '未填写日期') {
+  if (!value) return fallback;
+  const direct = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (direct) return `${direct[1]}-${direct[2]}-${direct[3]}`;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((item) => [item.type, item.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
 function placeholderValues(context) {
   const originalName = String(context.originalName || '材料文件');
   const extension = path.extname(originalName);
   return {
+    项目序号: sequenceText(context.projectSequence),
+    项目序号两位: sequenceText(context.projectSequence, 2),
+    项目序号三位: sequenceText(context.projectSequence, 3),
+    材料序号: sequenceText(context.materialSequence),
+    材料序号两位: sequenceText(context.materialSequence, 2),
     年度: context.projectYear ?? '未知年度',
     组别: context.projectGroup || '未分组',
     项目编号: context.projectCode || '无项目编号',
     作品名称: context.projectTitle || '无作品名称',
+    项目类别: context.projectCategory || '未设置类别',
+    立项日期: dateText(context.approvalDate),
     负责人: context.owner || '未登记负责人',
+    负责人学号工号: context.ownerIdentifiers || '未登记编号',
+    负责人学院单位: context.ownerOrganizations || '未登记单位',
+    负责人电话: context.ownerPhone || '未登记电话',
+    项目成员: context.memberNames || '未登记成员',
+    指导教师: context.advisorNames || '未登记指导教师',
     材料任务: context.taskName || '未命名任务',
     材料类别: context.categoryName || '未命名材料',
-    原文件名: originalName.slice(0, Math.max(0, originalName.length - extension.length)) || '材料文件'
+    原文件名: originalName.slice(0, Math.max(0, originalName.length - extension.length)) || '材料文件',
+    原扩展名: extension.replace(/^\./, '').toLowerCase() || '无扩展名',
+    提交日期: dateText(context.approvedSubmittedAt),
+    审核通过日期: dateText(context.approvedAt),
+    导出日期: dateText(context.exportDate || new Date()),
+    导出批次: context.exportBatch || 'ARCH-000001'
   };
 }
 
@@ -203,9 +242,14 @@ export function renderArchivePath(configInput, context) {
 export function archivePreview(configInput) {
   const config = normalizeArchiveTemplateConfig(configInput);
   const context = {
+    projectSequence: 1, materialSequence: 1,
     projectYear: 2026, projectGroup: '创新组', projectCode: 'CX2026-001',
-    projectTitle: '智能校园材料管理系统', owner: '张同学', taskName: '中期检查材料',
-    categoryName: '中期报告', categoryId: 1, originalName: '中期报告终稿.docx'
+    projectTitle: '智能校园材料管理系统', projectCategory: '科技创新类', approvalDate: '2026-03-15',
+    owner: '张同学', ownerIdentifiers: '20260001', ownerOrganizations: '计算机学院',
+    ownerPhone: '13800000000', memberNames: '李同学、王同学', advisorNames: '赵老师',
+    taskName: '中期检查材料', categoryName: '中期报告', categoryId: 1,
+    originalName: '中期报告终稿.docx', approvedSubmittedAt: '2026-08-05', approvedAt: '2026-08-06',
+    exportDate: '2026-08-06', exportBatch: 'ARCH-000123'
   };
   const preview = config.version === 1
     ? renderArchivePath(config, context)

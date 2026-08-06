@@ -29,11 +29,11 @@
         <el-table-column label="导出批次" width="135"><template #default="{ row }">{{ batchLabel(row) }}</template></el-table-column>
         <el-table-column prop="templateName" label="使用模板" min-width="150" show-overflow-tooltip />
         <el-table-column prop="exportScopeLabel" label="结构化范围" min-width="230" show-overflow-tooltip />
-        <el-table-column prop="exportUser" label="导出人" width="90" />
+        <el-table-column prop="exportUser" label="导出人" width="110" show-overflow-tooltip />
         <el-table-column prop="createdAt" label="创建时间" width="165"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column prop="exportStatus" label="状态" width="80"><template #default="{ row }"><el-tag :type="statusType(row.exportStatus)">{{ statusLabel(row.exportStatus) }}</el-tag></template></el-table-column>
         <el-table-column label="材料 / 缺失" width="105"><template #default="{ row }"><span v-if="row.exportSummary">{{ row.exportSummary.approvedMaterialCount }} / <strong :class="{ 'danger-text': row.exportSummary.missingCount }">{{ row.exportSummary.missingCount }}</strong></span><span v-else>-</span></template></el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }"><el-button text @click="showDetail(row)">详情</el-button><el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button></template>
         </el-table-column>
       </el-table>

@@ -72,7 +72,7 @@ async function main() {
 
   const templateConfig = {
     version: 2,
-    projectRootRule: '{项目编号}-{作品名称}',
+    projectRootRule: '{项目序号三位}-{项目编号}-{作品名称}',
     preserveEmptyFolders: true,
     defaultFileNameRule: '{材料类别}_{原文件名}',
     nodes: [{
@@ -80,7 +80,7 @@ async function main() {
         id: 'folder-files', type: 'folder', nameRule: '证明材料', children: [{
           id: 'placed-task', type: 'task', materialTaskId: Number(target.taskId), fileTaskId: Number(target.categoryId),
           materialTaskName: target.taskName, fileTaskName: target.categoryName,
-          fileNameRule: '{项目编号}_{材料类别}_{原文件名}'
+          fileNameRule: '{材料序号两位}_{项目编号}_{材料类别}_{原文件名}'
         }]
       }]
     }]
@@ -109,7 +109,11 @@ async function main() {
     const [[stored]] = await pool.execute('SELECT export_file_path AS exportFilePath FROM archive_export_records WHERE id = ?', [exportId]);
     exportFilePath = stored.exportFilePath;
     const zipBuffer = await fs.readFile(exportFilePath);
-    const rendered = renderArchivePath(templateConfig, { ...target, originalName: target.originalName || '未提交材料.docx' });
+    const rendered = renderArchivePath(templateConfig, {
+      ...target, projectSequence: 1, materialSequence: 1,
+      exportBatch: `ARCH-${String(exportId).padStart(6, '0')}`,
+      originalName: target.originalName || '未提交材料.docx'
+    });
     const expectedDirectory = rendered.directory;
     if (!zipBuffer.includes(Buffer.from(expectedDirectory))) throw new Error(`ZIP does not contain expected project tree: ${expectedDirectory}`);
     if (!target.approvedSubmissionId && !zipBuffer.includes(Buffer.from('缺失材料报告.xlsx'))) throw new Error('Missing report is absent from tree archive ZIP');

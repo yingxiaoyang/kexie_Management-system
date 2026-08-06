@@ -56,7 +56,7 @@
           <div class="project-root-editor">
             <el-icon><FolderOpened /></el-icon><span>每个项目</span><el-input v-model.trim="form.projectRootRule" aria-label="项目根目录命名规则" />
           </div>
-          <div class="placeholder-toolbar root-placeholder-toolbar"><span>插入根目录字段：</span><el-button v-for="item in projectPlaceholders" :key="item.token" size="small" plain @click="form.projectRootRule += item.token">{{ item.label }}</el-button></div>
+          <div class="field-insert-row root-placeholder-toolbar"><span>项目根目录字段：</span><ArchivePlaceholderPicker :groups="rootPlaceholderGroups" button-text="选择项目字段" @select="insertRootToken" /></div>
 
           <div class="archive-tree-canvas" :class="{ 'is-empty': !form.nodes.length }" @dragover.prevent @drop="dropAtRoot">
             <ArchiveTreeNode v-for="(node, index) in form.nodes" :key="node.id" :node="node" :index="index" :count="form.nodes.length" :selected-id="selectedId" @select="selectedId = $event" @add-folder="addFolder" @move="moveNode" @remove="removeNode" @drop-node="handleDrop" />
@@ -67,7 +67,7 @@
             <div class="property-editor-title"><el-icon><EditPen /></el-icon>{{ selectedNode.type === 'folder' ? '文件夹命名' : '归档文件命名' }}</div>
             <el-input v-if="selectedNode.type === 'folder'" v-model.trim="selectedNode.nameRule" placeholder="固定文字和占位字段可组合" />
             <el-input v-else v-model.trim="selectedNode.fileNameRule" placeholder="系统会自动保留原扩展名" />
-            <div class="placeholder-toolbar"><el-button v-for="item in placeholders" :key="item.token" size="small" plain @click="insertSelectedToken(item.token)">{{ item.label }}</el-button></div>
+            <div class="field-insert-row"><span>可用命名字段：</span><ArchivePlaceholderPicker :groups="placeholderGroups" @select="insertSelectedToken" /></div>
           </div>
         </section>
 
@@ -107,17 +107,54 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ArchivePlaceholderPicker from '../../components/ArchivePlaceholderPicker.vue'
 import ArchiveTreeNode from '../../components/ArchiveTreeNode.vue'
 import { apiRequest } from '../../services/http'
 
-const placeholders = [
-  { label: '年度', token: '{年度}' }, { label: '组别', token: '{组别}' },
-  { label: '项目编号', token: '{项目编号}' }, { label: '作品名称', token: '{作品名称}' },
-  { label: '负责人', token: '{负责人}' }, { label: '材料任务', token: '{材料任务}' },
-  { label: '材料类别', token: '{材料类别}' }, { label: '原文件名', token: '{原文件名}' },
+const placeholderGroups = [
+  { label: '导出与排序', items: [
+    { label: '项目序号', token: '{项目序号}', example: '1', rootAllowed: true },
+    { label: '项目序号两位', token: '{项目序号两位}', example: '01', rootAllowed: true },
+    { label: '项目序号三位', token: '{项目序号三位}', example: '001', rootAllowed: true },
+    { label: '材料序号', token: '{材料序号}', example: '1', rootAllowed: false },
+    { label: '材料序号两位', token: '{材料序号两位}', example: '01', rootAllowed: false },
+    { label: '导出日期', token: '{导出日期}', example: '2026-08-06', rootAllowed: true },
+    { label: '导出批次', token: '{导出批次}', example: 'ARCH-000123', rootAllowed: true }
+  ] },
+  { label: '项目信息', items: [
+    { label: '年度', token: '{年度}', example: '2026', rootAllowed: true },
+    { label: '组别', token: '{组别}', example: '创新组', rootAllowed: true },
+    { label: '项目编号', token: '{项目编号}', example: 'CX2026-001', rootAllowed: true },
+    { label: '作品名称', token: '{作品名称}', example: '智能校园材料管理系统', rootAllowed: true },
+    { label: '项目类别', token: '{项目类别}', example: '科技创新类', rootAllowed: true },
+    { label: '立项日期', token: '{立项日期}', example: '2026-03-15', rootAllowed: true }
+  ] },
+  { label: '负责人和团队', items: [
+    { label: '负责人', token: '{负责人}', example: '张同学', rootAllowed: true },
+    { label: '负责人学号工号', token: '{负责人学号工号}', example: '20260001', rootAllowed: true },
+    { label: '负责人学院单位', token: '{负责人学院单位}', example: '计算机学院', rootAllowed: true },
+    { label: '负责人电话', token: '{负责人电话}', example: '13800000000', rootAllowed: true },
+    { label: '项目成员', token: '{项目成员}', example: '李同学、王同学', rootAllowed: true },
+    { label: '指导教师', token: '{指导教师}', example: '赵老师', rootAllowed: true }
+  ] },
+  { label: '材料和审核', items: [
+    { label: '材料任务', token: '{材料任务}', example: '结项材料', rootAllowed: false },
+    { label: '材料类别', token: '{材料类别}', example: '项目申报书', rootAllowed: false },
+    { label: '原文件名', token: '{原文件名}', example: '申报书终稿', rootAllowed: false },
+    { label: '原扩展名', token: '{原扩展名}', example: 'docx', rootAllowed: false },
+    { label: '提交日期', token: '{提交日期}', example: '2026-08-05', rootAllowed: false },
+    { label: '审核通过日期', token: '{审核通过日期}', example: '2026-08-06', rootAllowed: false }
+  ] }
 ]
-const projectPlaceholders = placeholders.slice(0, 5)
-const sampleValues = { 年度: '2026', 组别: '创新组', 项目编号: 'CX2026-001', 作品名称: '智能校园材料管理系统', 负责人: '张同学', 材料任务: '结项材料', 材料类别: '项目申报书', 原文件名: '申报书终稿' }
+const rootPlaceholderGroups = computed(() => placeholderGroups.map((group) => ({ ...group, items: group.items.filter((item) => item.rootAllowed) })).filter((group) => group.items.length))
+const sampleValues = {
+  项目序号: '1', 项目序号两位: '01', 项目序号三位: '001', 材料序号: '1', 材料序号两位: '01',
+  导出日期: '2026-08-06', 导出批次: 'ARCH-000123', 年度: '2026', 组别: '创新组',
+  项目编号: 'CX2026-001', 作品名称: '智能校园材料管理系统', 项目类别: '科技创新类', 立项日期: '2026-03-15',
+  负责人: '张同学', 负责人学号工号: '20260001', 负责人学院单位: '计算机学院', 负责人电话: '13800000000',
+  项目成员: '李同学、王同学', 指导教师: '赵老师', 材料任务: '结项材料', 材料类别: '项目申报书',
+  原文件名: '申报书终稿', 原扩展名: 'docx', 提交日期: '2026-08-05', 审核通过日期: '2026-08-06'
+}
 const templates = ref([])
 const taskLibrary = ref([])
 const loading = ref(false)
@@ -181,14 +218,15 @@ function cleanComponent(value) {
 }
 const renderPattern = (pattern, values = sampleValues) => cleanComponent(String(pattern || '').replace(/\{([^{}]+)\}/g, (_match, key) => values[key] || ''))
 
-function previewEntries(nodes, folders = [], lines = []) {
+function previewEntries(nodes, folders = [], lines = [], sequence = { value: 0 }) {
   for (const node of nodes) {
     if (node.type === 'folder') {
       const folderName = renderPattern(node.nameRule)
       lines.push({ depth: folders.length + 1, text: `${folderName}/` })
-      previewEntries(node.children, [...folders, folderName], lines)
+      previewEntries(node.children, [...folders, folderName], lines, sequence)
     } else {
-      const values = { ...sampleValues, 材料任务: node.materialTaskName || sampleValues.材料任务, 材料类别: node.fileTaskName || sampleValues.材料类别 }
+      sequence.value += 1
+      const values = { ...sampleValues, 材料序号: String(sequence.value), 材料序号两位: String(sequence.value).padStart(2, '0'), 材料任务: node.materialTaskName || sampleValues.材料任务, 材料类别: node.fileTaskName || sampleValues.材料类别 }
       lines.push({ depth: folders.length + 1, text: `${renderPattern(node.fileNameRule || form.defaultFileNameRule, values)}.docx` })
     }
   }
@@ -320,6 +358,7 @@ function insertSelectedToken(token) {
   if (selectedNode.value.type === 'folder') selectedNode.value.nameRule += token
   else selectedNode.value.fileNameRule += token
 }
+function insertRootToken(token) { form.projectRootRule += token }
 
 function configOf() {
   return { version: 2, projectRootRule: form.projectRootRule.trim(), preserveEmptyFolders: form.preserveEmptyFolders, defaultFileNameRule: form.defaultFileNameRule, nodes: form.nodes }

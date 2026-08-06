@@ -93,10 +93,16 @@ async function expectedMaterials(scope, templateConfig) {
     `SELECT mt.id AS taskId, mt.task_name AS taskName,
             p.id AS projectId, p.project_year AS projectYear, p.project_group AS projectGroup,
             p.project_code AS projectCode, p.title AS projectTitle,
+            p.category AS projectCategory, p.approval_date AS approvalDate,
             mc.id AS categoryId, mc.category_name AS categoryName,
             COALESCE(owners.ownerNames, '未登记负责人') AS owner,
+            COALESCE(owners.ownerIdentifiers, '未登记编号') AS ownerIdentifiers,
+            COALESCE(owners.ownerOrganizations, '未登记单位') AS ownerOrganizations,
             COALESCE(owners.ownerPhones, '未登记电话') AS ownerPhone,
-            approved.id AS approvedSubmissionId, approved.reviewed_at AS approvedAt,
+            COALESCE(members.memberNames, '未登记成员') AS memberNames,
+            COALESCE(advisors.advisorNames, '未登记指导教师') AS advisorNames,
+            approved.id AS approvedSubmissionId, approved.submitted_at AS approvedSubmittedAt,
+            approved.reviewed_at AS approvedAt, reviewer.display_name AS reviewerName,
             latest.id AS latestSubmissionId, latest.review_status AS latestReviewStatus,
             latest.return_reason AS latestReturnReason
      FROM material_tasks mt
@@ -113,12 +119,28 @@ async function expectedMaterials(scope, templateConfig) {
      LEFT JOIN (
        SELECT pp.project_id,
               GROUP_CONCAT(pe.name ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerNames,
+              GROUP_CONCAT(COALESCE(NULLIF(CASE WHEN pe.person_type = 'student' THEN pe.student_no ELSE pe.teacher_no END, ''), '未登记编号') ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerIdentifiers,
+              GROUP_CONCAT(COALESCE(NULLIF(pe.college, ''), NULLIF(pe.unit, ''), '未登记单位') ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerOrganizations,
               GROUP_CONCAT(COALESCE(NULLIF(pe.phone, ''), '未登记电话') ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerPhones
        FROM project_participations pp
        JOIN people pe ON pe.id = pp.person_id AND pe.deleted_at IS NULL
        WHERE pp.role = 'owner' AND pp.deleted_at IS NULL
        GROUP BY pp.project_id
      ) owners ON owners.project_id = p.id
+     LEFT JOIN (
+       SELECT pp.project_id, GROUP_CONCAT(pe.name ORDER BY pe.name SEPARATOR '、') AS memberNames
+       FROM project_participations pp
+       JOIN people pe ON pe.id = pp.person_id AND pe.deleted_at IS NULL
+       WHERE pp.role = 'member' AND pp.deleted_at IS NULL
+       GROUP BY pp.project_id
+     ) members ON members.project_id = p.id
+     LEFT JOIN (
+       SELECT pp.project_id, GROUP_CONCAT(pe.name ORDER BY pe.name SEPARATOR '、') AS advisorNames
+       FROM project_participations pp
+       JOIN people pe ON pe.id = pp.person_id AND pe.deleted_at IS NULL
+       WHERE pp.role = 'advisor' AND pp.deleted_at IS NULL
+       GROUP BY pp.project_id
+     ) advisors ON advisors.project_id = p.id
      LEFT JOIN material_submissions approved ON approved.id = (
        SELECT candidate.id FROM material_submissions candidate
        WHERE candidate.material_task_id = mt.id
@@ -129,6 +151,7 @@ async function expectedMaterials(scope, templateConfig) {
        ORDER BY COALESCE(candidate.reviewed_at, candidate.submitted_at, candidate.created_at) DESC, candidate.id DESC
        LIMIT 1
      )
+     LEFT JOIN users reviewer ON reviewer.id = approved.reviewed_by AND reviewer.deleted_at IS NULL
      LEFT JOIN material_submissions latest ON latest.id = (
        SELECT candidate.id FROM material_submissions candidate
        WHERE candidate.material_task_id = mt.id
@@ -189,9 +212,36 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
   let approvedMaterialCount = 0;
   let exportedFileCount = 0;
 
+  const exportBatch = `ARCH-${String(exportId).padStart(6, '0')}`;
+  const exportDate = new Date();
+  const projectSequences = new Map();
+  const placementSequences = new Map(
+    (templateConfig.version === 2 ? archivePlacements(templateConfig) : [])
+      .map((item, index) => [Number(item.fileTaskId), index + 1])
+  );
+  const fallbackMaterialSequences = new Map();
+  const fallbackMaterialCounters = new Map();
+  const archiveRows = rows.map((row) => {
+    const projectId = Number(row.projectId);
+    if (!projectSequences.has(projectId)) projectSequences.set(projectId, projectSequences.size + 1);
+    const fallbackKey = `${projectId}:${Number(row.categoryId)}`;
+    if (!fallbackMaterialSequences.has(fallbackKey)) {
+      const next = (fallbackMaterialCounters.get(projectId) || 0) + 1;
+      fallbackMaterialCounters.set(projectId, next);
+      fallbackMaterialSequences.set(fallbackKey, next);
+    }
+    return {
+      ...row,
+      projectSequence: projectSequences.get(projectId),
+      materialSequence: placementSequences.get(Number(row.categoryId)) || fallbackMaterialSequences.get(fallbackKey),
+      exportBatch,
+      exportDate
+    };
+  });
+
   if (templateConfig.version === 2 && templateConfig.preserveEmptyFolders) {
     const projects = new Map();
-    for (const row of rows) {
+    for (const row of archiveRows) {
       if (!projects.has(Number(row.projectId))) projects.set(Number(row.projectId), row);
     }
     for (const project of projects.values()) {
@@ -205,10 +255,10 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     }
   }
 
-  for (const row of rows) {
+  for (const row of archiveRows) {
     if (!row.approvedSubmissionId) {
       missingRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+        row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, missingReason(row)
       ]);
       continue;
@@ -219,7 +269,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       const sourcePath = path.resolve(String(file.storagePath || ''));
       if (!isPathInside(env.upload.root, sourcePath)) {
         missingRows.push([
-          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
           row.taskName, row.categoryName, `审核通过版本的文件路径不在系统上传目录：${file.originalName}`
         ]);
         continue;
@@ -227,7 +277,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       const stat = await fs.promises.stat(sourcePath).catch(() => null);
       if (!stat?.isFile()) {
         missingRows.push([
-          row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
           row.taskName, row.categoryName, `审核通过版本的文件不存在：${file.originalName}`
         ]);
         continue;
@@ -240,7 +290,7 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
       materialFileCount += 1;
       exportedFileCount += 1;
       exportedRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+        row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, file.originalName, archiveEntry,
         row.approvedSubmissionId, row.approvedAt || ''
       ]);
@@ -248,25 +298,25 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     if (materialFileCount) approvedMaterialCount += 1;
     if (!files.length) {
       missingRows.push([
-        row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+        row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
         row.taskName, row.categoryName, '审核通过版本没有关联文件'
       ]);
     }
   }
 
   if (!rows.length) {
-    missingRows.push(['', '', '', '', '', '', '', '', '导出范围内没有匹配的材料任务、项目或材料类别']);
+    missingRows.push(['', '', '', '', '', '', '', '', '', '导出范围内没有匹配的材料任务、项目或材料类别']);
   }
 
   zip.append(xlsxBuffer(
-    ['年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '原文件名', 'ZIP 内路径', '提交版本ID', '审核通过时间'],
+    ['项目序号', '年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '原文件名', 'ZIP 内路径', '提交版本ID', '审核通过时间'],
     exportedRows,
     '导出材料清单'
   ), { name: uniqueArchiveEntry('导出材料清单.xlsx', usedEntries) });
 
   if (missingRows.length) {
     zip.append(xlsxBuffer(
-      ['年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '缺失原因'],
+      ['项目序号', '年度', '组别', '项目编号', '作品名称', '负责人', '负责人电话', '材料任务', '材料类别', '缺失原因'],
       missingRows,
       '缺失材料报告'
     ), { name: uniqueArchiveEntry('缺失材料报告.xlsx', usedEntries) });
