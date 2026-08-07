@@ -60,7 +60,12 @@ async function main() {
   let recoverExportId;
   let exhaustedExportId;
   let cleanupExportId;
+  let blockedCleanupExportId;
+  const concurrentExportIds = [];
+  let concurrentAcceptedCount = 0;
   const cleanupZipPath = path.join(env.archive.root, `archive-cleanup-check-${Date.now()}.zip`);
+  const blockedCleanupPath = path.join(env.archive.root, `archive-cleanup-blocked-${Date.now()}.zip`);
+  const orphanZipPath = path.join(env.archive.root, `archive-export-999999${Date.now()}.zip`);
   const importBatchPath = path.join(batchDir, `archive-cleanup-check-${Date.now()}.json`);
 
   try {
@@ -74,6 +79,59 @@ async function main() {
       ],
       fileNameRule: '{项目编号}_{材料类别}_{原文件名}'
     });
+
+    const [[existingQueueCount]] = await pool.execute(
+      "SELECT COUNT(*) AS total FROM archive_export_records WHERE export_status IN ('queued', 'processing')"
+    );
+    const remainingCapacity = Math.max(0, env.archive.maxQueued - Number(existingQueueCount.total));
+    const concurrentResults = await Promise.allSettled(Array.from({ length: env.archive.maxQueued + 3 }, (_item, index) => validateAndEnqueueArchiveExport({
+      userId: admin.id,
+      archiveTemplateId: templateId,
+      rawScope: {
+        years: [Number(target.projectYear)],
+        groups: [],
+        materialTaskIds: [Number(target.taskId)],
+        projectIds: [Number(target.projectId)]
+      },
+      remark: `归档队列并发上限自动验收-${index}`
+    })));
+    for (const result of concurrentResults) {
+      if (result.status === 'fulfilled') concurrentExportIds.push(result.value.id);
+    }
+    concurrentAcceptedCount = concurrentExportIds.length;
+    const rejectedCount = concurrentResults.filter((result) => result.status === 'rejected').length;
+    if (concurrentAcceptedCount > remainingCapacity || (remainingCapacity < concurrentResults.length && rejectedCount === 0)) {
+      throw new Error(`Archive queue capacity can be exceeded: accepted=${concurrentExportIds.length}, capacity=${remainingCapacity}`);
+    }
+    for (const id of concurrentExportIds.splice(0)) await deleteExportRecord(id);
+
+    const originalMinFreeBytes = env.archive.minFreeBytes;
+    try {
+      env.archive.minFreeBytes = Number.MAX_SAFE_INTEGER / 4;
+      let diskRejected = false;
+      let unexpectedQueuedId;
+      try {
+        const unexpectedQueued = await validateAndEnqueueArchiveExport({
+          userId: admin.id,
+          archiveTemplateId: templateId,
+          rawScope: {
+            years: [Number(target.projectYear)],
+            groups: [],
+            materialTaskIds: [Number(target.taskId)],
+            projectIds: [Number(target.projectId)]
+          },
+          remark: '归档队列磁盘空间自动验收'
+        });
+        unexpectedQueuedId = unexpectedQueued.id;
+      } catch (error) {
+        diskRejected = error?.code === 'EXPORT_DISK_SPACE_LOW';
+      } finally {
+        await deleteExportRecord(unexpectedQueuedId);
+      }
+      if (!diskRejected) throw new Error('Archive queue did not reject an export when required disk budget was unavailable');
+    } finally {
+      env.archive.minFreeBytes = originalMinFreeBytes;
+    }
 
     const queued = await validateAndEnqueueArchiveExport({
       userId: admin.id,
@@ -162,14 +220,31 @@ async function main() {
       [admin.id, templateId, cleanupZipPath, env.archive.zipRetentionDays + 1]
     );
     cleanupExportId = cleanupInsert.insertId;
+    await fs.mkdir(blockedCleanupPath, { recursive: true });
+    const [blockedCleanupInsert] = await pool.execute(
+      `INSERT INTO archive_export_records
+       (export_user_id, archive_template_id, export_scope, template_snapshot, export_file_path, export_status, finished_at)
+       VALUES (?, ?, JSON_OBJECT(), JSON_OBJECT('version', 1, 'directoryLevels', JSON_ARRAY(JSON_OBJECT('pattern', '{年度}')), 'fileNameRule', '{原文件名}'),
+               ?, 'success', DATE_SUB(NOW(), INTERVAL ? DAY))`,
+      [admin.id, templateId, blockedCleanupPath, env.archive.zipRetentionDays + 1]
+    );
+    blockedCleanupExportId = blockedCleanupInsert.insertId;
+    await fs.writeFile(orphanZipPath, Buffer.from('PK\x03\x04orphan archive cleanup check'));
+    const oldTime = new Date(Date.now() - Math.max(env.archive.workerTimeoutMs, 60 * 60 * 1000) - 60 * 1000);
+    await fs.utimes(orphanZipPath, oldTime, oldTime);
     await fs.mkdir(batchDir, { recursive: true });
     await fs.writeFile(importBatchPath, JSON.stringify({ batchId: 'archive-cleanup-check', expiresAt: new Date(Date.now() - 60 * 1000).toISOString() }), 'utf8');
     await cleanupArchiveStorage();
     const zipStillExists = await fs.stat(cleanupZipPath).then(() => true).catch(() => false);
+    const orphanStillExists = await fs.stat(orphanZipPath).then(() => true).catch(() => false);
     const batchStillExists = await fs.stat(importBatchPath).then(() => true).catch(() => false);
     const [[cleanedRecord]] = await pool.execute('SELECT export_file_path AS exportFilePath, zip_cleanup_at AS zipCleanupAt FROM archive_export_records WHERE id = ?', [cleanupExportId]);
-    if (zipStillExists || batchStillExists || cleanedRecord.exportFilePath || !cleanedRecord.zipCleanupAt) {
+    const [[blockedRecord]] = await pool.execute('SELECT export_file_path AS exportFilePath, zip_cleanup_at AS zipCleanupAt FROM archive_export_records WHERE id = ?', [blockedCleanupExportId]);
+    if (zipStillExists || orphanStillExists || batchStillExists || cleanedRecord.exportFilePath || !cleanedRecord.zipCleanupAt) {
       throw new Error('Archive cleanup did not remove expired ZIP/import batch files');
+    }
+    if (!blockedRecord.exportFilePath || blockedRecord.zipCleanupAt) {
+      throw new Error('Archive cleanup marked a ZIP as cleaned even though the file deletion was not successful');
     }
 
     console.log(JSON.stringify({
@@ -177,17 +252,22 @@ async function main() {
       failedAndRetried: failureExportId,
       recoveredTimeout: recoverExportId,
       exhaustedTimeout: exhaustedExportId,
-      cleanupRecord: cleanupExportId
+      cleanupRecord: cleanupExportId,
+      concurrentAccepted: concurrentAcceptedCount
     }, null, 2));
   } finally {
+    for (const id of concurrentExportIds) await deleteExportRecord(id);
     await Promise.all([
       deleteExportRecord(successExportId),
       deleteExportRecord(failureExportId),
       deleteExportRecord(recoverExportId),
       deleteExportRecord(exhaustedExportId),
-      deleteExportRecord(cleanupExportId)
+      deleteExportRecord(cleanupExportId),
+      deleteExportRecord(blockedCleanupExportId)
     ]);
     await fs.unlink(cleanupZipPath).catch(() => undefined);
+    await fs.rm(blockedCleanupPath, { recursive: true, force: true }).catch(() => undefined);
+    await fs.unlink(orphanZipPath).catch(() => undefined);
     await fs.unlink(importBatchPath).catch(() => undefined);
     if (templateId) await pool.execute('DELETE FROM archive_templates WHERE id = ?', [templateId]);
   }

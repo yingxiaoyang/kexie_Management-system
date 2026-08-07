@@ -16,6 +16,7 @@ import { badRequest, notFound, tooManyRequests } from '../utils/errors.js';
 import { resolveDownloadFile, isPathInside } from '../utils/safeFiles.js';
 
 const workerLockName = 'kexie_archive_export_worker_lock';
+const queueLockName = 'kexie_archive_export_queue_lock';
 const batchDir = path.resolve(env.upload.root, '../imports/batches');
 
 export const exportStatuses = ['queued', 'processing', 'success', 'failed'];
@@ -193,13 +194,18 @@ export function scopeLabel(scope) {
   return parts.length ? parts.join('；') : '全部已发布或已关闭材料任务及其适用项目';
 }
 
-async function ensureDiskSpace(bytesNeeded = env.archive.minFreeBytes) {
-  if (!bytesNeeded) return;
+function archiveRequiredFreeBytes(sourceBytes = 0) {
+  return Math.ceil(env.archive.minFreeBytes + Math.max(0, Number(sourceBytes) || 0) * 1.1);
+}
+
+async function ensureDiskSpace(bytesNeeded = archiveRequiredFreeBytes()) {
+  const requiredBytes = Math.max(0, Number(bytesNeeded) || 0);
+  if (!requiredBytes) return;
   await fs.promises.mkdir(env.archive.root, { recursive: true });
   if (typeof fs.promises.statfs !== 'function') return;
   const stat = await fs.promises.statfs(env.archive.root);
   const available = Number(stat.bavail) * Number(stat.bsize);
-  if (Number.isFinite(available) && available < bytesNeeded) {
+  if (Number.isFinite(available) && available < requiredBytes) {
     throw badRequest('Export disk free space is below the configured limit', 'EXPORT_DISK_SPACE_LOW');
   }
 }
@@ -214,6 +220,29 @@ async function estimateArchiveExport(scope, templateConfig) {
     for (const file of files) totalFileBytes += Number(file.fileSize) || 0;
   }
   return { rows, projectCount, totalFileBytes };
+}
+
+async function withQueueLock(callback) {
+  const connection = await pool.getConnection();
+  let locked = false;
+  try {
+    const [[lockRow]] = await connection.execute('SELECT GET_LOCK(?, 5) AS lockAcquired', [queueLockName]);
+    locked = Number(lockRow.lockAcquired) === 1;
+    if (!locked) throw tooManyRequests('Archive export queue is busy, please try again later', 'ARCHIVE_QUEUE_BUSY');
+    return await callback(connection);
+  } finally {
+    if (locked) await connection.execute('SELECT RELEASE_LOCK(?)', [queueLockName]).catch(() => undefined);
+    connection.release();
+  }
+}
+
+async function assertQueueHasCapacity(connection) {
+  const [[queueCount]] = await connection.execute(
+    "SELECT COUNT(*) AS total FROM archive_export_records WHERE export_status IN ('queued', 'processing')"
+  );
+  if (Number(queueCount.total) >= env.archive.maxQueued) {
+    throw tooManyRequests('Too many archive exports are already queued', 'ARCHIVE_QUEUE_FULL');
+  }
 }
 
 export async function validateAndEnqueueArchiveExport({ userId, archiveTemplateId, rawScope, remark }) {
@@ -235,14 +264,6 @@ export async function validateAndEnqueueArchiveExport({ userId, archiveTemplateI
     }
   }
 
-  const [[queueCount]] = await pool.execute(
-    "SELECT COUNT(*) AS total FROM archive_export_records WHERE export_status IN ('queued', 'processing')"
-  );
-  if (Number(queueCount.total) >= env.archive.maxQueued) {
-    throw tooManyRequests('Too many archive exports are already queued', 'ARCHIVE_QUEUE_FULL');
-  }
-
-  await ensureDiskSpace();
   const estimate = await estimateArchiveExport(scope, templateConfig);
   if (estimate.projectCount > env.archive.maxProjects) {
     throw badRequest(`Export project count exceeds the configured limit of ${env.archive.maxProjects}`, 'ARCHIVE_EXPORT_PROJECT_LIMIT');
@@ -250,14 +271,18 @@ export async function validateAndEnqueueArchiveExport({ userId, archiveTemplateI
   if (estimate.totalFileBytes > env.archive.maxTotalFileBytes) {
     throw badRequest('Export source file size exceeds the configured limit', 'ARCHIVE_EXPORT_SIZE_LIMIT');
   }
+  await ensureDiskSpace(archiveRequiredFreeBytes(estimate.totalFileBytes));
 
-  const [result] = await pool.execute(
-    `INSERT INTO archive_export_records
-     (export_user_id, archive_template_id, export_scope, template_snapshot, export_status, max_attempts, remark)
-     VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
-    [userId, archiveTemplateId, JSON.stringify(scope), JSON.stringify(templateConfig), env.archive.maxAttempts, cleanRemark || null]
-  );
-  return { id: result.insertId, exportStatus: 'queued' };
+  return withQueueLock(async (connection) => {
+    await assertQueueHasCapacity(connection);
+    const [result] = await connection.execute(
+      `INSERT INTO archive_export_records
+       (export_user_id, archive_template_id, export_scope, template_snapshot, export_status, max_attempts, remark)
+       VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
+      [userId, archiveTemplateId, JSON.stringify(scope), JSON.stringify(templateConfig), env.archive.maxAttempts, cleanRemark || null]
+    );
+    return { id: result.insertId, exportStatus: 'queued' };
+  });
 }
 
 async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows, fileMap, exportId }) {
@@ -435,11 +460,14 @@ async function runArchiveExport(record) {
   if (totalFileBytes > env.archive.maxTotalFileBytes) {
     throw badRequest('Export source file size exceeds the configured limit', 'ARCHIVE_EXPORT_SIZE_LIMIT');
   }
-  await ensureDiskSpace();
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-  const finalPath = path.join(env.archive.root, `archive-export-${record.id}-${stamp}.zip`);
+  await ensureDiskSpace(archiveRequiredFreeBytes(totalFileBytes));
+  const finalPath = path.join(env.archive.root, `archive-export-${record.id}.zip`);
   temporaryPath = `${finalPath}.tmp`;
   try {
+    const temporaryCleanup = await deleteFileIfInside(env.archive.root, temporaryPath);
+    if (!temporaryCleanup.cleanupSafe) throw badRequest('Previous temporary export file cannot be cleaned up', 'ARCHIVE_EXPORT_FILE_BUSY');
+    const finalCleanup = await deleteFileIfInside(env.archive.root, finalPath);
+    if (!finalCleanup.cleanupSafe) throw badRequest('Previous archive export file cannot be cleaned up', 'ARCHIVE_EXPORT_FILE_BUSY');
     const summary = await writeZip({ temporaryPath, finalPath, templateConfig, scope, rows, fileMap, exportId: record.id });
     await pool.execute(
       `UPDATE archive_export_records
@@ -565,35 +593,44 @@ export async function processNextArchiveExport(workerId) {
 }
 
 export async function retryArchiveExport(exportId) {
-  const [[queueCount]] = await pool.execute(
-    "SELECT COUNT(*) AS total FROM archive_export_records WHERE export_status IN ('queued', 'processing')"
-  );
-  if (Number(queueCount.total) >= env.archive.maxQueued) {
-    throw tooManyRequests('Too many archive exports are already queued', 'ARCHIVE_QUEUE_FULL');
-  }
-  const [result] = await pool.execute(
-    `UPDATE archive_export_records
-     SET export_status = 'queued', attempt_count = 0, started_at = NULL, heartbeat_at = NULL,
-         worker_id = NULL, failure_reason = NULL, finished_at = NULL
-     WHERE id = ? AND export_status = 'failed'`,
-    [exportId]
-  );
-  if (!result.affectedRows) throw badRequest('Only failed archive exports can be retried', 'ARCHIVE_EXPORT_NOT_RETRYABLE');
+  await withQueueLock(async (connection) => {
+    await assertQueueHasCapacity(connection);
+    const [result] = await connection.execute(
+      `UPDATE archive_export_records
+       SET export_status = 'queued', attempt_count = 0, started_at = NULL, heartbeat_at = NULL,
+           worker_id = NULL, failure_reason = NULL, finished_at = NULL
+       WHERE id = ? AND export_status = 'failed'`,
+      [exportId]
+    );
+    if (!result.affectedRows) throw badRequest('Only failed archive exports can be retried', 'ARCHIVE_EXPORT_NOT_RETRYABLE');
+  });
 }
 
 async function deleteFileIfInside(rootPath, storedPath) {
   const rawPath = typeof storedPath === 'string' ? storedPath.trim() : '';
-  if (!rawPath || rawPath.includes('\0')) return false;
+  if (!rawPath || rawPath.includes('\0')) return { cleanupSafe: false, deleted: false };
   const rootRealPath = await fs.promises.realpath(rootPath).catch(() => null);
-  if (!rootRealPath) return false;
+  if (!rootRealPath) return { cleanupSafe: false, deleted: false };
   const candidatePath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(rootPath, rawPath);
-  if (!isPathInside(rootRealPath, candidatePath)) return false;
-  const fileRealPath = await fs.promises.realpath(candidatePath).catch(() => null);
-  if (!fileRealPath || !isPathInside(rootRealPath, fileRealPath)) return false;
-  const stat = await fs.promises.stat(fileRealPath).catch(() => null);
-  if (!stat?.isFile()) return false;
-  await fs.promises.unlink(fileRealPath).catch(() => undefined);
-  return true;
+  if (!isPathInside(rootRealPath, candidatePath)) return { cleanupSafe: false, deleted: false };
+  let fileRealPath;
+  try {
+    fileRealPath = await fs.promises.realpath(candidatePath);
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return { cleanupSafe: true, deleted: false, missing: true };
+    return { cleanupSafe: false, deleted: false, error };
+  }
+  if (!isPathInside(rootRealPath, fileRealPath)) return { cleanupSafe: false, deleted: false };
+  const stat = await fs.promises.stat(fileRealPath).catch((error) => ({ error }));
+  if (stat?.error) return { cleanupSafe: false, deleted: false, error: stat.error };
+  if (!stat?.isFile()) return { cleanupSafe: false, deleted: false };
+  try {
+    await fs.promises.unlink(fileRealPath);
+    return { cleanupSafe: true, deleted: true };
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return { cleanupSafe: true, deleted: false, missing: true };
+    return { cleanupSafe: false, deleted: false, error };
+  }
 }
 
 async function cleanupOldArchiveZips() {
@@ -608,11 +645,42 @@ async function cleanupOldArchiveZips() {
      LIMIT 200`
   );
   for (const row of rows) {
-    await deleteFileIfInside(env.archive.root, row.exportFilePath);
-    await pool.execute(
-      'UPDATE archive_export_records SET export_file_path = NULL, zip_cleanup_at = NOW() WHERE id = ?',
-      [row.id]
-    );
+    const cleanup = await deleteFileIfInside(env.archive.root, row.exportFilePath);
+    if (cleanup.cleanupSafe) {
+      await pool.execute(
+        'UPDATE archive_export_records SET export_file_path = NULL, zip_cleanup_at = NOW() WHERE id = ?',
+        [row.id]
+      );
+    } else if (cleanup.error) {
+      console.error(`Cannot delete expired archive ZIP for export ${row.id}`, cleanup.error);
+    }
+  }
+}
+
+async function cleanupOrphanArchiveZips() {
+  await fs.promises.mkdir(env.archive.root, { recursive: true });
+  const rootRealPath = await fs.promises.realpath(env.archive.root).catch(() => null);
+  if (!rootRealPath) return;
+  const [rows] = await pool.execute(
+    'SELECT export_file_path AS exportFilePath FROM archive_export_records WHERE export_file_path IS NOT NULL'
+  );
+  const referenced = new Set();
+  for (const row of rows) {
+    const rawPath = String(row.exportFilePath || '').trim();
+    if (!rawPath || rawPath.includes('\0')) continue;
+    const candidatePath = path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(env.archive.root, rawPath);
+    if (!isPathInside(rootRealPath, candidatePath)) continue;
+    referenced.add(path.resolve(candidatePath).toLocaleLowerCase());
+  }
+  const cutoff = Date.now() - Math.max(env.archive.workerTimeoutMs, 60 * 60 * 1000);
+  const entries = await fs.promises.readdir(env.archive.root, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^archive-export-\d+(?:-\d{14})?\.zip$/i.test(entry.name)) continue;
+    const filePath = path.join(env.archive.root, entry.name);
+    const stat = await fs.promises.stat(filePath).catch(() => null);
+    if (!stat || stat.mtimeMs >= cutoff) continue;
+    if (referenced.has(path.resolve(filePath).toLocaleLowerCase())) continue;
+    await fs.promises.unlink(filePath).catch((error) => console.error(`Cannot delete orphan archive ZIP ${filePath}`, error));
   }
 }
 
@@ -652,6 +720,7 @@ async function cleanupImportBatches() {
 export async function cleanupArchiveStorage() {
   await Promise.all([
     cleanupOldArchiveZips(),
+    cleanupOrphanArchiveZips(),
     cleanupTemporaryExportFiles(),
     cleanupImportBatches()
   ]);
