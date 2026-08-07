@@ -13,6 +13,7 @@ import importTemplateRoutes from './routes/importTemplates.js';
 import materialTaskRoutes from './routes/materialTasks.js';
 import peopleRoutes from './routes/people.js';
 import projectRoutes from './routes/projects.js';
+import reportDesignRoutes from './routes/reportDesigns.js';
 import submissionRoutes from './routes/submissions.js';
 import uploadRoutes from './routes/uploads.js';
 import { forbidden } from './utils/errors.js';
@@ -55,6 +56,7 @@ export function createApp() {
   app.use('/api/archive-exports', archiveExportRoutes);
   app.use('/api/projects', projectRoutes);
   app.use('/api/people', peopleRoutes);
+  app.use('/api/report-designs', reportDesignRoutes);
   app.use('/api/imports', importRoutes);
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/material-tasks', materialTaskRoutes);

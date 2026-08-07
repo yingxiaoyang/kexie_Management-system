@@ -69,6 +69,7 @@ import {
   Checked,
   DataBoard,
   Download,
+  Document,
   Files,
   Folder,
   List,
@@ -93,6 +94,7 @@ const menuItems = [
   { path: '/admin/reviews', label: '材料审核', icon: Checked },
   { path: '/admin/archive-templates', label: '归档模板', icon: Files },
   { path: '/admin/exports', label: '整理包导出', icon: Download },
+  { path: '/admin/report-designer', label: '数据报表', icon: Document },
   { path: '/admin/rules', label: '参与规则', icon: Lock },
 ]
 

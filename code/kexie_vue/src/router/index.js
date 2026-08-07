@@ -31,6 +31,7 @@ const routes = [
       { path: 'reviews', name: 'admin-reviews', component: () => import('../views/admin/AdminReviews.vue'), meta: { title: '材料审核' } },
       { path: 'archive-templates', name: 'admin-archive-templates', component: () => import('../views/admin/AdminArchiveTemplates.vue'), meta: { title: '归档模板' } },
       { path: 'exports', name: 'admin-exports', component: () => import('../views/admin/AdminExports.vue'), meta: { title: '整理包导出' } },
+      { path: 'report-designer', name: 'admin-report-designer', component: () => import('../views/admin/AdminReportDesigner.vue'), meta: { title: '数据报表设计器' } },
       { path: 'rules', name: 'admin-rules', component: () => import('../views/admin/AdminRules.vue'), meta: { title: '参与规则' } },
     ],
   },
