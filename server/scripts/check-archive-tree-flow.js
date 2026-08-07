@@ -20,7 +20,7 @@ async function api(path, token, options = {}) {
 async function waitForExport(token, exportId) {
   for (let index = 0; index < 60; index += 1) {
     const record = (await api(`/archive-exports/${exportId}`, token)).data;
-    if (record.exportStatus !== 'processing') return record;
+    if (!['queued', 'processing'].includes(record.exportStatus)) return record;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error('Tree archive export timed out');
@@ -104,6 +104,7 @@ async function main() {
       }
     });
     exportId = started.data.id;
+    if (started.data.exportStatus !== 'queued') throw new Error(`Tree archive export was not queued first: ${started.data.exportStatus}`);
     const record = await waitForExport(token, exportId);
     if (record.exportStatus !== 'success') throw new Error(`Tree archive export failed: ${record.failureReason || 'unknown'}`);
     const [[stored]] = await pool.execute('SELECT export_file_path AS exportFilePath FROM archive_export_records WHERE id = ?', [exportId]);

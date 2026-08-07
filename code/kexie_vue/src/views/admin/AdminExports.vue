@@ -19,7 +19,7 @@
       <div class="toolbar">
         <div class="filters">
           <el-select v-model="filters.status" clearable placeholder="导出状态" style="width: 160px" @change="searchRecords">
-            <el-option label="生成中" value="processing" /><el-option label="成功" value="success" /><el-option label="失败" value="failed" />
+            <el-option label="排队中" value="queued" /><el-option label="生成中" value="processing" /><el-option label="成功" value="success" /><el-option label="失败" value="failed" />
           </el-select>
           <el-button :loading="loading" @click="searchRecords"><el-icon><Refresh /></el-icon>刷新</el-button>
         </div>
@@ -33,8 +33,8 @@
         <el-table-column prop="createdAt" label="创建时间" width="165"><template #default="{ row }">{{ formatTime(row.createdAt) }}</template></el-table-column>
         <el-table-column prop="exportStatus" label="状态" width="80"><template #default="{ row }"><el-tag :type="statusType(row.exportStatus)">{{ statusLabel(row.exportStatus) }}</el-tag></template></el-table-column>
         <el-table-column label="材料 / 缺失" width="105"><template #default="{ row }"><span v-if="row.exportSummary">{{ row.exportSummary.approvedMaterialCount }} / <strong :class="{ 'danger-text': row.exportSummary.missingCount }">{{ row.exportSummary.missingCount }}</strong></span><span v-else>-</span></template></el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
-          <template #default="{ row }"><el-button text @click="showDetail(row)">详情</el-button><el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button></template>
+        <el-table-column label="操作" width="180" fixed="right">
+          <template #default="{ row }"><el-button text @click="showDetail(row)">详情</el-button><el-button v-if="row.exportStatus === 'failed'" text type="warning" @click="retry(row)">重试</el-button><el-button text type="primary" :disabled="!row.downloadable" @click="download(row)">下载</el-button></template>
         </el-table-column>
       </el-table>
 
@@ -47,7 +47,7 @@
             <div><span class="mobile-field-label">导出人</span><span class="mobile-field-value">{{ row.exportUser }}</span></div>
             <div><span class="mobile-field-label">材料 / 缺失</span><span class="mobile-field-value">{{ row.exportSummary ? `${row.exportSummary.approvedMaterialCount} / ${row.exportSummary.missingCount}` : '-' }}</span></div>
           </div>
-          <div class="mobile-card-footer"><el-button @click="showDetail(row)">查看详情</el-button><el-button type="primary" :disabled="!row.downloadable" @click="download(row)">下载 ZIP</el-button></div>
+          <div class="mobile-card-footer"><el-button @click="showDetail(row)">查看详情</el-button><el-button v-if="row.exportStatus === 'failed'" type="warning" @click="retry(row)">重试</el-button><el-button type="primary" :disabled="!row.downloadable" @click="download(row)">下载 ZIP</el-button></div>
         </article>
       </div>
 
@@ -68,7 +68,7 @@
         <el-form-item label="导出备注"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="可填写本次整理包用途或交接说明" /></el-form-item>
       </el-form>
       <section class="scope-preview-card"><strong>当前筛选：</strong>{{ scopePreview }}</section>
-      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="creating" @click="createExport">开始生成 ZIP</el-button></template>
+      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="creating" @click="createExport">加入导出队列</el-button></template>
     </el-dialog>
 
     <el-dialog v-model="detailVisible" title="导出记录详情" width="680px">
@@ -77,13 +77,15 @@
         <el-descriptions-item label="使用模板">{{ selectedRecord.templateName }}</el-descriptions-item>
         <el-descriptions-item label="导出范围">{{ selectedRecord.exportScopeLabel }}</el-descriptions-item>
         <el-descriptions-item label="状态"><el-tag :type="statusType(selectedRecord.exportStatus)">{{ statusLabel(selectedRecord.exportStatus) }}</el-tag></el-descriptions-item>
+        <el-descriptions-item label="尝试次数">{{ selectedRecord.attemptCount || 0 }} / {{ selectedRecord.maxAttempts || 3 }}</el-descriptions-item>
         <el-descriptions-item label="统计摘要"><template v-if="selectedRecord.exportSummary">应收 {{ selectedRecord.exportSummary.expectedMaterialCount }} 项；含通过材料 {{ selectedRecord.exportSummary.approvedMaterialCount }} 项；导出 {{ selectedRecord.exportSummary.exportedFileCount }} 个文件；缺失 {{ selectedRecord.exportSummary.missingCount }} 条。</template><template v-else>生成完成后显示</template></el-descriptions-item>
         <el-descriptions-item v-if="selectedRecord.failureReason" label="失败原因"><span class="danger-text">{{ selectedRecord.failureReason }}</span></el-descriptions-item>
         <el-descriptions-item label="缺失报告">{{ selectedRecord.exportSummary?.missingReportIncluded ? 'ZIP 内已生成“缺失材料报告.xlsx”' : '没有缺失项' }}</el-descriptions-item>
+        <el-descriptions-item v-if="selectedRecord.zipCleanupAt" label="ZIP 清理">整理包文件已按保存期限自动清理</el-descriptions-item>
         <el-descriptions-item label="备注">{{ selectedRecord.remark || '无' }}</el-descriptions-item>
         <el-descriptions-item label="创建 / 完成">{{ formatTime(selectedRecord.createdAt) }} / {{ formatTime(selectedRecord.finishedAt) }}</el-descriptions-item>
       </el-descriptions>
-      <template #footer><el-button @click="detailVisible = false">关闭</el-button><el-button type="primary" :disabled="!selectedRecord?.downloadable" @click="download(selectedRecord)">下载 ZIP</el-button></template>
+      <template #footer><el-button @click="detailVisible = false">关闭</el-button><el-button v-if="selectedRecord?.exportStatus === 'failed'" type="warning" @click="retry(selectedRecord)">重试</el-button><el-button type="primary" :disabled="!selectedRecord?.downloadable" @click="download(selectedRecord)">下载 ZIP</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -114,7 +116,7 @@ let pollingTimer
 
 const summaries = computed(() => [
   { label: '导出记录', value: pagination.total || records.value.length },
-  { label: '生成中', value: records.value.filter((item) => item.exportStatus === 'processing').length },
+  { label: '排队/生成', value: records.value.filter((item) => ['queued', 'processing'].includes(item.exportStatus)).length },
   { label: '本页成功', value: records.value.filter((item) => item.exportStatus === 'success').length },
   { label: '本页失败', value: records.value.filter((item) => item.exportStatus === 'failed').length },
 ])
@@ -197,7 +199,7 @@ async function createExport() {
       method: 'POST',
       body: { archiveTemplateId: form.archiveTemplateId, scope: { years: form.years, groups: form.groups, materialTaskIds: form.materialTaskIds, projectIds: form.projectIds }, remark: form.remark },
     })
-    ElMessage.success('导出任务已创建，系统正在生成 ZIP')
+    ElMessage.success('导出任务已加入队列')
     dialogVisible.value = false
     filters.status = ''
     pagination.page = 1
@@ -228,15 +230,26 @@ async function download(row) {
   }
 }
 
+async function retry(row) {
+  try {
+    await apiRequest(`/archive-exports/${row.id}/retry`, { method: 'POST' })
+    ElMessage.success('导出任务已重新加入队列')
+    detailVisible.value = false
+    await loadRecords(true)
+  } catch (error) {
+    ElMessage.error(error.message)
+  }
+}
+
 function startPolling() {
   pollingTimer = window.setInterval(() => {
-    if (records.value.some((item) => item.exportStatus === 'processing')) loadRecords(true)
+    if (records.value.some((item) => ['queued', 'processing'].includes(item.exportStatus))) loadRecords(true)
   }, 3000)
 }
 
 const batchLabel = (row) => `ARCH-${String(row.id).padStart(6, '0')}`
-const statusLabel = (value) => ({ processing: '生成中', success: '成功', failed: '失败' }[value] || value)
-const statusType = (value) => ({ processing: 'warning', success: 'success', failed: 'danger' }[value] || 'info')
+const statusLabel = (value) => ({ queued: '排队中', processing: '生成中', success: '成功', failed: '失败' }[value] || value)
+const statusType = (value) => ({ queued: 'info', processing: 'warning', success: 'success', failed: 'danger' }[value] || 'info')
 const taskStatusLabel = (value) => ({ published: '收集中', closed: '已关闭' }[value] || value)
 const formatTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
 

@@ -19,6 +19,15 @@ function readPositiveInteger(name, defaultValue) {
   return Number.isInteger(value) && value > 0 ? value : defaultValue;
 }
 
+function readBoolean(name, defaultValue) {
+  const rawValue = process.env[name];
+  if (rawValue == null || rawValue === '') return defaultValue;
+  const normalized = rawValue.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
 function readList(name, defaultValue = []) {
   const rawValue = process.env[name];
   if (!rawValue) return defaultValue;
@@ -165,7 +174,19 @@ export const env = {
     ])
   },
   archive: {
-    root: path.resolve(__dirname, '../../', process.env.EXPORT_ROOT || '../storage/exports')
+    root: path.resolve(__dirname, '../../', process.env.EXPORT_ROOT || '../storage/exports'),
+    workerEnabled: readBoolean('ARCHIVE_WORKER_ENABLED', true),
+    workerPollMs: readPositiveInteger('ARCHIVE_WORKER_POLL_MS', 2000),
+    workerHeartbeatMs: readPositiveInteger('ARCHIVE_WORKER_HEARTBEAT_MS', 5000),
+    workerTimeoutMs: readPositiveInteger('ARCHIVE_WORKER_TIMEOUT_MS', 5 * 60 * 1000),
+    cleanupIntervalMs: readPositiveInteger('ARCHIVE_CLEANUP_INTERVAL_MS', 60 * 60 * 1000),
+    maxAttempts: readPositiveInteger('ARCHIVE_EXPORT_MAX_ATTEMPTS', 3),
+    maxQueued: readPositiveInteger('ARCHIVE_EXPORT_MAX_QUEUED', 5),
+    maxProjects: readPositiveInteger('ARCHIVE_EXPORT_MAX_PROJECTS', 300),
+    maxTotalFileBytes: readPositiveInteger('ARCHIVE_EXPORT_MAX_TOTAL_MB', 2048) * 1024 * 1024,
+    minFreeBytes: readPositiveInteger('ARCHIVE_EXPORT_MIN_FREE_MB', 1024) * 1024 * 1024,
+    zipRetentionDays: readPositiveInteger('ARCHIVE_ZIP_RETENTION_DAYS', 30),
+    importBatchRetentionHours: readPositiveInteger('IMPORT_BATCH_RETENTION_HOURS', 24)
   }
 };
 

@@ -13,6 +13,8 @@ coverage/
 .env
 .env.*
 !.env.example
+server/.env
+database/.env.mysql
 
 # Logs
 *.log
@@ -37,6 +39,10 @@ Desktop.ini
 
 # Local runtime files, uploaded materials and generated export ZIPs
 storage/
+storage/uploads/
+storage/exports/
+storage/imports/
+storage/**/*.tmp
 uploads/
 tmp/
 temp/

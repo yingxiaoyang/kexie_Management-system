@@ -26,11 +26,14 @@ async function api(path, token, options = {}) {
 async function createAndWaitForExport(token, body) {
   const createdExport = await api('/archive-exports', token, { method: 'POST', body });
   const exportId = createdExport.data.id;
+  if (createdExport.data.exportStatus !== 'queued') {
+    throw new Error(`Archive export was not queued first: ${createdExport.data.exportStatus}`);
+  }
   let record;
   for (let index = 0; index < 40; index += 1) {
     const detail = await api(`/archive-exports/${exportId}`, token);
     record = detail.data;
-    if (record.exportStatus !== 'processing') break;
+    if (!['queued', 'processing'].includes(record.exportStatus)) break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   if (record?.exportStatus !== 'success') {
@@ -163,6 +166,7 @@ async function main() {
     target = { taskId: firstTask.id, projectId: firstProject.id, projectYear: firstProject.projectYear };
   }
 
+  const exportChecks = [];
   const approvedCheck = await createAndWaitForExport(token, {
     archiveTemplateId: template.id,
     scope: {
@@ -173,6 +177,7 @@ async function main() {
     },
     remark: '自动化归档导出闭环检查'
   });
+  exportChecks.push(approvedCheck);
 
   let missingTaskId;
   try {
@@ -202,6 +207,7 @@ async function main() {
       },
       remark: '自动化缺失材料报告检查'
     });
+    exportChecks.push(missingCheck);
     if (!missingCheck.record.exportSummary?.missingReportIncluded || missingCheck.record.exportSummary.missingCount < 1) {
       throw new Error('Missing material report was not generated');
     }
@@ -218,6 +224,7 @@ async function main() {
       },
       remark: '自动化空范围缺失报告检查'
     });
+    exportChecks.push(emptyScopeCheck);
     if (emptyScopeCheck.record.exportSummary?.expectedMaterialCount !== 0
       || !emptyScopeCheck.record.exportSummary?.missingReportIncluded
       || emptyScopeCheck.record.exportSummary?.missingCount !== 1
@@ -285,6 +292,10 @@ async function main() {
       }
     }, null, 2));
   } finally {
+    for (const item of exportChecks) {
+      if (item.exportFilePath) await fs.unlink(item.exportFilePath).catch(() => undefined);
+      await pool.execute('DELETE FROM archive_export_records WHERE id = ?', [item.exportId]).catch(() => undefined);
+    }
     if (missingTaskId) {
       await pool.execute('DELETE FROM material_task_projects WHERE material_task_id = ?', [missingTaskId]);
       await pool.execute('DELETE FROM material_categories WHERE material_task_id = ?', [missingTaskId]);
