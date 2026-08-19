@@ -74,7 +74,7 @@ export function requirePermissionWhenAdmin(permissionKey) {
 
 export function requireSuperAdmin(req, res, next) {
   if (req.user?.role !== 'admin' || req.user.adminLevel !== 'super') {
-    next(forbidden('仅超级管理员可以管理管理员账号和权限', 'SUPER_ADMIN_REQUIRED'));
+    next(forbidden('仅超级管理员可以执行此操作', 'SUPER_ADMIN_REQUIRED'));
     return;
   }
   next();

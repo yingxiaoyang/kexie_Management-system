@@ -8,6 +8,7 @@ import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { badRequest, forbidden, notFound } from '../utils/errors.js';
+import { normalizeUploadedFileName } from '../utils/fileNames.js';
 import { success } from '../utils/response.js';
 
 const router = Router();
@@ -124,15 +125,16 @@ router.post(
 
       const savedFiles = [];
       for (const file of req.files || []) {
+        const originalName = normalizeUploadedFileName(file.originalname);
         const [result] = await connection.execute(
           `INSERT INTO task_template_attachments
            (material_task_id, material_category_id, original_name, storage_path, file_size, mime_type, uploaded_by)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [taskId, categoryId, file.originalname, file.path, file.size, file.mimetype, req.user.id]
+          [taskId, categoryId, originalName, file.path, file.size, file.mimetype, req.user.id]
         );
         savedFiles.push({
           id: result.insertId,
-          originalName: file.originalname,
+          originalName,
           fileSize: file.size,
           mimeType: file.mimetype
         });
@@ -212,10 +214,11 @@ router.post(
         || (context.scopeType === 'group' && context.taskGroup === context.projectGroup)
         || (context.scopeType === 'custom' && Boolean(context.customIncluded));
       if (!inScope) throw forbidden('Project is not included in this material task');
+      const originalName = normalizeUploadedFileName(req.file.originalname);
       const allowedExtensions = Array.isArray(context.allowedExtensions)
         ? context.allowedExtensions
         : JSON.parse(context.allowedExtensions || '[]');
-      const extension = cleanExtension(req.file.originalname);
+      const extension = cleanExtension(originalName);
       if (allowedExtensions.length && !allowedExtensions.includes(extension)) {
         throw badRequest(`File type .${extension} is not allowed for this task`, 'UPLOAD_TYPE_NOT_ALLOWED');
       }
@@ -249,11 +252,11 @@ router.post(
         `INSERT INTO material_files
          (submission_id, original_name, storage_path, file_size, mime_type, uploaded_by)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [submissionResult.insertId, req.file.originalname, req.file.path, req.file.size, req.file.mimetype, req.user.id]
+        [submissionResult.insertId, originalName, req.file.path, req.file.size, req.file.mimetype, req.user.id]
       );
       const file = {
         id: fileResult.insertId,
-        originalName: req.file.originalname,
+        originalName,
         fileSize: req.file.size,
         mimeType: req.file.mimetype
       };

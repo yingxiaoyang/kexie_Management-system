@@ -37,7 +37,7 @@ try {
 
   const migrationsDir = path.join(projectRoot, 'database', 'migrations');
   const migrations = (await fs.readdir(migrationsDir)).filter((name) => /^\d+_.+\.sql$/i.test(name)).sort();
-  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013']);
+  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014']);
   for (const migration of migrations) {
     if (migration === '011_application_approval_loop.sql') {
       const [firstPerson] = await database.execute(
@@ -153,11 +153,25 @@ try {
     [databaseName]
   );
   assert.equal(Number(approvalBatchColumn.total), 1, '013 must add projects.approval_batch');
+  const [[reviewAuditTable]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'material_review_audit_events'`,
+    [databaseName]
+  );
+  assert.equal(Number(reviewAuditTable.total), 1, '014 must add material_review_audit_events');
+  const [[assignmentColumns]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'material_submissions'
+       AND COLUMN_NAME IN ('assigned_to', 'assigned_by', 'assigned_at', 'assignment_version')`,
+    [databaseName]
+  );
+  assert.equal(Number(assignmentColumns.total), 4, '014 must add all assignment columns');
 
   process.stdout.write(`Temporary schema verified: ${Number(tableCount.total)} tables, ${Number(columnCount.total)} columns.\n`);
   process.stdout.write('Owner invariant transaction checks passed.\n');
   process.stdout.write('Single-super and limited-administrator permission checks passed.\n');
   process.stdout.write('Project workspace audit migration checks passed.\n');
+  process.stdout.write('Material review assignment migration checks passed.\n');
 } finally {
   await database?.end().catch(() => undefined);
   if (admin && created) await admin.query(`DROP DATABASE \`${databaseName}\``);

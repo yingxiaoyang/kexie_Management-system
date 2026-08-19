@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
@@ -9,6 +10,7 @@ import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
+import { inspectOriginalFileName, setFileResponseHeaders } from '../utils/fileNames.js';
 
 const router = Router();
 const taskStatuses = ['draft', 'published', 'closed'];
@@ -124,9 +126,14 @@ async function attachTaskDetails(items) {
   const templatesByTask = new Map();
   for (const row of templateRows) {
     const taskId = Number(row.materialTaskId);
+    const fileName = inspectOriginalFileName(row.originalName);
     if (!templatesByTask.has(taskId)) templatesByTask.set(taskId, []);
     templatesByTask.get(taskId).push({
       ...row,
+      originalName: fileName.displayName,
+      storedOriginalName: fileName.originalName,
+      fileNameRecovered: fileName.recovered,
+      fileNameWarning: fileName.warning,
       id: Number(row.id),
       categoryId: row.categoryId == null ? null : Number(row.categoryId),
       fileSize: Number(row.fileSize || 0)
@@ -461,7 +468,10 @@ router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owne
        FROM task_template_attachments WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
       params
     );
-    success(res, rows);
+    success(res, rows.map((row) => {
+      const fileName = inspectOriginalFileName(row.originalName);
+      return { ...row, originalName: fileName.displayName, storedOriginalName: fileName.originalName, fileNameRecovered: fileName.recovered, fileNameWarning: fileName.warning };
+    }));
   } catch (error) {
     next(error);
   }
@@ -491,7 +501,9 @@ router.get('/:taskId/templates/:attachmentId/download', requireAuth, requireRole
       invalidCode: 'TEMPLATE_FILE_PATH_INVALID',
       missingMessage: 'Template file not found'
     });
-    res.download(filePath, attachment.original_name);
+    const fileName = inspectOriginalFileName(attachment.original_name).displayName;
+    setFileResponseHeaders(res, { fileName, contentType: 'application/octet-stream' });
+    fs.createReadStream(filePath).on('error', next).pipe(res);
   } catch (error) {
     next(error);
   }

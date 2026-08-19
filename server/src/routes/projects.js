@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -15,6 +16,7 @@ import {
 } from '../services/projectWorkspaceService.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { env } from '../config/env.js';
+import { inspectOriginalFileName, setFileResponseHeaders } from '../utils/fileNames.js';
 
 const router = Router();
 const statuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped'];
@@ -242,7 +244,9 @@ router.get('/:id/material-files/:fileId/download', requireAuth, requireRole('adm
       invalidCode: 'SUBMISSION_FILE_PATH_INVALID',
       missingMessage: 'Submission file not found'
     });
-    res.download(filePath, file.originalName);
+    const fileName = inspectOriginalFileName(file.originalName).displayName;
+    setFileResponseHeaders(res, { fileName, contentType: 'application/octet-stream' });
+    fs.createReadStream(filePath).on('error', next).pipe(res);
   } catch (error) {
     next(error);
   }

@@ -90,7 +90,7 @@ console.log(JSON.stringify({
     'limited-administrator permission decisions',
     'backend module permission bindings',
     'frontend route and menu permission consistency',
-    'material_review reservation',
+    'material_review assignment boundary',
     'legacy roles remain unchanged'
   ]
 }, null, 2));

@@ -46,10 +46,16 @@ export async function apiRequest(path, options = {}) {
   return payload
 }
 
-export async function downloadFile(path, fallbackName = 'download') {
+export async function downloadFile(path, fallbackName = 'download', options = {}) {
   let response
   try {
-    response = await fetch(buildApiUrl(path), { credentials: 'include' })
+    const { method = 'GET', body } = options
+    response = await fetch(buildApiUrl(path), {
+      method,
+      credentials: 'include',
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
   } catch {
     throw new Error('下载失败，请确认后端服务已启动')
   }
@@ -77,4 +83,25 @@ export async function downloadFile(path, fallbackName = 'download') {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+}
+
+export async function fetchFileBlob(path) {
+  let response
+  try {
+    response = await fetch(buildApiUrl(path), { credentials: 'include' })
+  } catch {
+    throw new Error('预览失败，请确认后端服务已启动')
+  }
+  if (!response.ok) {
+    if (response.status === 401) handleUnauthorized()
+    let message = '预览失败'
+    try {
+      const payload = await response.json()
+      message = payload.message || message
+    } catch {
+      // Ignore non-JSON error bodies.
+    }
+    throw new Error(message)
+  }
+  return URL.createObjectURL(await response.blob())
 }

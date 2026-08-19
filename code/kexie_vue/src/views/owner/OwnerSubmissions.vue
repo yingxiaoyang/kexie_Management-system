@@ -115,7 +115,7 @@
 
     <el-dialog v-model="templatesVisible" title="任务模板" width="600px">
       <el-table v-loading="templatesLoading" :data="templates" empty-text="暂无模板">
-        <el-table-column prop="originalName" label="文件名" min-width="260" />
+        <el-table-column label="文件名" min-width="260"><template #default="{ row }"><span>{{ row.originalName }}</span><el-alert v-if="row.fileNameWarning" class="filename-warning" :title="row.fileNameWarning" :type="row.fileNameRecovered ? 'success' : 'warning'" :closable="false" /></template></el-table-column>
         <el-table-column prop="fileSize" label="大小" width="100"><template #default="{ row }">{{ formatSize(row.fileSize) }}</template></el-table-column>
         <el-table-column label="操作" width="90"><template #default="{ row }"><el-button text type="primary" @click="downloadTemplate(row)">下载</el-button></template></el-table-column>
       </el-table>

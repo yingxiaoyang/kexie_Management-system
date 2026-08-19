@@ -1,4 +1,5 @@
 import { notFound } from '../utils/errors.js';
+import { inspectOriginalFileName } from '../utils/fileNames.js';
 
 const jsonValue = (value, fallback) => {
   if (value === null || value === undefined) return fallback;
@@ -73,7 +74,7 @@ function applicationEventPresentation(eventType, payload) {
   return { summary: summaries[eventType] || payload.summary || payload.reason || eventType, state: exceptionTypes.has(eventType) ? 'exception' : 'completed' };
 }
 
-export function buildProjectTimeline({ project, source, auditEvents = [], applicationEvents = [], importEvents = [], submissions = [] }) {
+export function buildProjectTimeline({ project, source, auditEvents = [], applicationEvents = [], importEvents = [], submissions = [], materialReviewEvents = [] }) {
   const events = [];
   if (project?.createdAt && !auditEvents.some((event) => event.eventType === 'project_created')) {
     events.push({
@@ -149,6 +150,11 @@ export function buildProjectTimeline({ project, source, auditEvents = [], applic
       legacyDerived: false
     });
   }
+  const auditedReviewSubmissionIds = new Set(
+    materialReviewEvents
+      .filter((row) => row.eventType === 'reviewed' || row.eventType === 'returned')
+      .map((row) => Number(row.submissionId))
+  );
   for (const row of submissions) {
     events.push({
       id: `submission-${row.id}`,
@@ -162,7 +168,7 @@ export function buildProjectTimeline({ project, source, auditEvents = [], applic
       state: row.reviewStatus === 'pending' ? 'current' : 'completed',
       legacyDerived: true
     });
-    if (row.reviewedAt) {
+    if (row.reviewedAt && !auditedReviewSubmissionIds.has(Number(row.id))) {
       events.push({
         id: `submission-review-${row.id}`,
         eventType: row.reviewStatus === 'returned' ? 'material_returned' : 'material_approved',
@@ -175,6 +181,25 @@ export function buildProjectTimeline({ project, source, auditEvents = [], applic
         legacyDerived: true
       });
     }
+  }
+  for (const row of materialReviewEvents) {
+    const summaries = {
+      assigned: `将“${row.taskName} / ${row.categoryName}”审核任务分配给 ${row.toAssigneeName}`,
+      reassigned: `将“${row.taskName} / ${row.categoryName}”由 ${row.fromAssigneeName || '原审核人'} 改派给 ${row.toAssigneeName}${row.reason ? `：${row.reason}` : ''}`,
+      reviewed: `通过“${row.categoryName}”审核`,
+      returned: `退回“${row.categoryName}”${row.reason ? `：${row.reason}` : ''}`
+    };
+    events.push({
+      id: `material-review-audit-${row.id}`,
+      eventType: `material_review_${row.eventType}`,
+      eventCategory: 'material',
+      occurredAt: dateValue(row.createdAt),
+      actor: row.actorName || null,
+      sourceModule: '材料审核',
+      summary: summaries[row.eventType] || row.eventType,
+      state: row.eventType === 'returned' ? 'exception' : 'completed',
+      legacyDerived: false
+    });
   }
   return events.sort((a, b) => new Date(b.occurredAt || 0) - new Date(a.occurredAt || 0));
 }
@@ -215,7 +240,12 @@ function groupMaterials(taskRows, submissionRows, fileRows) {
   const fileMap = new Map();
   for (const file of fileRows) {
     const list = fileMap.get(Number(file.submissionId)) || [];
-    list.push({ id: Number(file.id), originalName: file.originalName, fileSize: Number(file.fileSize), mimeType: file.mimeType, createdAt: file.createdAt });
+    const fileName = inspectOriginalFileName(file.originalName);
+    list.push({
+      id: Number(file.id), originalName: fileName.displayName, storedOriginalName: fileName.originalName,
+      fileNameRecovered: fileName.recovered, fileNameWarning: fileName.warning,
+      fileSize: Number(file.fileSize), mimeType: file.mimeType, createdAt: file.createdAt
+    });
     fileMap.set(Number(file.submissionId), list);
   }
   for (const row of submissionRows) {
@@ -272,14 +302,18 @@ export async function loadProjectWorkspace(connection, projectId, user) {
   const [submissionRows] = await connection.execute(
     `SELECT ms.id, ms.material_category_id AS categoryId, ms.submission_status AS submissionStatus,
             ms.review_status AS reviewStatus, ms.return_reason AS returnReason, ms.submitted_at AS submittedAt,
+            ms.assigned_at AS assignedAt, ms.assignment_version AS assignmentVersion,
             ms.reviewed_at AS reviewedAt, ms.created_at AS createdAt,
-            submitter.display_name AS submitterName, reviewer.display_name AS reviewerName,
+            submitter.display_name AS submitterName, assigner.display_name AS assignerName,
+            assignee.display_name AS assigneeName, reviewer.display_name AS reviewerName,
             mt.task_name AS taskName, mc.category_name AS categoryName,
             ROW_NUMBER() OVER (PARTITION BY ms.material_task_id, ms.material_category_id ORDER BY ms.id) AS version
      FROM material_submissions ms
      JOIN material_tasks mt ON mt.id = ms.material_task_id
      JOIN material_categories mc ON mc.id = ms.material_category_id
      JOIN users submitter ON submitter.id = ms.submitter_user_id
+     LEFT JOIN users assigner ON assigner.id = ms.assigned_by
+     LEFT JOIN users assignee ON assignee.id = ms.assigned_to
      LEFT JOIN users reviewer ON reviewer.id = ms.reviewed_by
      WHERE ms.project_id = ? AND ms.deleted_at IS NULL ORDER BY ms.id DESC`, [projectId]
   );
@@ -321,8 +355,22 @@ export async function loadProjectWorkspace(connection, projectId, user) {
         ))
      ORDER BY ibr.created_at DESC`, [projectId, projectId, projectId]
   );
+  const [materialReviewEvents] = await connection.execute(
+    `SELECT audit.id, audit.submission_id AS submissionId, audit.event_type AS eventType,
+            audit.reason, audit.created_at AS createdAt, actor.display_name AS actorName,
+            previous.display_name AS fromAssigneeName, next_assignee.display_name AS toAssigneeName,
+            mt.task_name AS taskName, mc.category_name AS categoryName
+     FROM material_review_audit_events audit
+     JOIN material_submissions ms ON ms.id = audit.submission_id
+     JOIN material_tasks mt ON mt.id = ms.material_task_id
+     JOIN material_categories mc ON mc.id = ms.material_category_id
+     JOIN users actor ON actor.id = audit.actor_user_id
+     LEFT JOIN users previous ON previous.id = audit.from_assignee_user_id
+     LEFT JOIN users next_assignee ON next_assignee.id = audit.to_assignee_user_id
+     WHERE audit.project_id = ? ORDER BY audit.created_at DESC, audit.id DESC`, [projectId]
+  );
   const materials = groupMaterials(taskRows, submissionRows, fileRows);
-  const timeline = buildProjectTimeline({ project, source, auditEvents, applicationEvents, importEvents, submissions: submissionRows });
+  const timeline = buildProjectTimeline({ project, source, auditEvents, applicationEvents, importEvents, submissions: submissionRows, materialReviewEvents });
   const completedMaterials = submissionRows.filter((row) => row.reviewStatus === 'approved').length;
   return {
     project,

@@ -29,3 +29,7 @@ export function locked(message = 'Account is temporarily locked', code = 'ACCOUN
 export function notFound(message = 'Not found', code = 'NOT_FOUND') {
   return new AppError(404, code, message);
 }
+
+export function conflict(message = 'Conflict', code = 'CONFLICT') {
+  return new AppError(409, code, message);
+}

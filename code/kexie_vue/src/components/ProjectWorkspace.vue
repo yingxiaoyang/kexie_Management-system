@@ -71,9 +71,9 @@
                 <el-empty v-if="!category.versions.length" description="尚未提交" :image-size="56" />
                 <div v-for="version in category.versions" :key="version.id" class="version-row">
                   <span class="version-number">V{{ version.version }}</span>
-                  <div class="version-main"><strong>{{ version.submitterName || '未知提交人' }}</strong><span>{{ formatDateTime(version.submittedAt || version.createdAt) }}</span><p v-if="version.returnReason">退回原因：{{ version.returnReason }}</p></div>
+                  <div class="version-main"><strong>{{ version.submitterName || '未知提交人' }}</strong><span>{{ formatDateTime(version.submittedAt || version.createdAt) }}</span><p v-if="version.assigneeName">分配人：{{ version.assignerName || '-' }} · 受派人：{{ version.assigneeName }} · {{ formatDateTime(version.assignedAt) }}</p><p v-if="version.reviewerName">实际审核人：{{ version.reviewerName }} · {{ formatDateTime(version.reviewedAt) }}</p><p v-if="version.returnReason">退回原因：{{ version.returnReason }}</p></div>
                   <el-tag :type="reviewType(version.reviewStatus)" effect="plain">{{ reviewLabel(version.reviewStatus) }}</el-tag>
-                  <div class="version-files"><el-button v-for="file in version.files" :key="file.id" link type="primary" @click="downloadMaterial(file)"><el-icon><Document /></el-icon>{{ file.originalName }}</el-button></div>
+                  <div class="version-files"><el-tooltip v-for="file in version.files" :key="file.id" :disabled="!file.fileNameWarning" :content="file.fileNameWarning"><el-button link type="primary" @click="downloadMaterial(file)"><el-icon><Document /></el-icon>{{ file.originalName }}<span v-if="file.fileNameWarning"> ⚠</span></el-button></el-tooltip></div>
                 </div>
               </el-collapse-item>
             </el-collapse>
