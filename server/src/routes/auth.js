@@ -34,6 +34,91 @@ const adminLoginIpLimiter = rateLimit({
   handler: rateLimitHandler('admin_login_ip_rate_limited')
 });
 
+const registrationIpLimiter = rateLimit({
+  windowMs: env.security.registrationWindowMs,
+  limit: () => env.security.registrationIpMax,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: rateLimitHandler('registration_ip_rate_limited')
+});
+
+function registrationText(value, field, maxLength) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text.length > maxLength) {
+    throw badRequest(`${field} is required and must not exceed ${maxLength} characters`, 'VALIDATION_ERROR');
+  }
+  return text;
+}
+
+router.post('/register', registrationIpLimiter, async (req, res, next) => {
+  let connection;
+  let transactionActive = false;
+  try {
+    const username = registrationText(req.body?.username, 'username', 40);
+    const studentNo = registrationText(req.body?.studentNo, 'studentNo', 40);
+    const name = registrationText(req.body?.name, 'name', 80);
+    const college = registrationText(req.body?.college, 'college', 120);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() || null : null;
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() || null : null;
+    if (!/^[A-Za-z0-9_.-]{4,40}$/.test(username)) {
+      throw badRequest('Username may only contain letters, numbers, dot, underscore and hyphen', 'VALIDATION_ERROR');
+    }
+    if (!/^[A-Za-z0-9-]{4,40}$/.test(studentNo)) {
+      throw badRequest('Student number format is invalid', 'VALIDATION_ERROR');
+    }
+    if (password.length < 10 || password.length > 72 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+      throw badRequest('Password must be 10-72 characters and contain letters and numbers', 'VALIDATION_ERROR');
+    }
+    if (phone && !/^[0-9+()\s-]{6,40}$/.test(phone)) {
+      throw badRequest('Phone format is invalid', 'VALIDATION_ERROR');
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw badRequest('Email format is invalid', 'VALIDATION_ERROR');
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    transactionActive = true;
+    const [[existing]] = await connection.execute(
+      `SELECT 1 FROM users WHERE username = ?
+       UNION ALL SELECT 1 FROM people WHERE student_no = ? LIMIT 1`,
+      [username, studentNo]
+    );
+    if (existing) {
+      const error = badRequest('Student number or username already exists', 'DUPLICATE_RESOURCE');
+      error.status = 409;
+      throw error;
+    }
+    const [personResult] = await connection.execute(
+      `INSERT INTO people (person_type, name, student_no, college, phone, email, account_status)
+       VALUES ('student', ?, ?, ?, ?, ?, 'enabled')`,
+      [name, studentNo, college, phone, email]
+    );
+    const [userResult] = await connection.execute(
+      `INSERT INTO users
+       (username, display_name, password_hash, role, status, person_id, password_reset_required)
+       VALUES (?, ?, ?, 'applicant', 'enabled', ?, 0)`,
+      [username, name, passwordHash, personResult.insertId]
+    );
+    await connection.commit();
+    transactionActive = false;
+    logSecurityEvent('applicant_registered', { ip: req.ip, userId: Number(userResult.insertId) });
+    success(res, { userId: Number(userResult.insertId), role: 'applicant' }, 'Registration successful');
+  } catch (error) {
+    if (connection && transactionActive) await connection.rollback().catch(() => undefined);
+    if (error.code === 'ER_DUP_ENTRY') {
+      error.status = 409;
+      error.code = 'DUPLICATE_RESOURCE';
+      error.message = 'Student number or username already exists';
+    }
+    next(error);
+  } finally {
+    connection?.release();
+  }
+});
+
 function publicUser(user) {
   return {
     id: user.id,

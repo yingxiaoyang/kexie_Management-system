@@ -436,7 +436,7 @@ router.patch('/:id/status', requireAuth, requireRole('admin'), async (req, res, 
   }
 });
 
-router.get('/:taskId/templates', requireAuth, async (req, res, next) => {
+router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     const categoryId = optionalPositiveInteger(req.query.categoryId, 'categoryId');
     await ensureMaterialTaskAccess(req.user, req.params.taskId, {
@@ -466,7 +466,7 @@ router.get('/:taskId/templates', requireAuth, async (req, res, next) => {
   }
 });
 
-router.get('/:taskId/templates/:attachmentId/download', requireAuth, async (req, res, next) => {
+router.get('/:taskId/templates/:attachmentId/download', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     const [rows] = await pool.execute(
       `SELECT tta.original_name, tta.storage_path, tta.material_category_id AS categoryId

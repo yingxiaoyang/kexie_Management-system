@@ -10,7 +10,7 @@ import { success } from '../utils/response.js';
 
 const router = Router();
 
-router.get('/', requireAuth, async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['ms.deleted_at IS NULL'];
@@ -85,7 +85,7 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), async (req, res, 
   }
 });
 
-router.get('/:id/files', requireAuth, async (req, res, next) => {
+router.get('/:id/files', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     await ensureSubmissionAccess(req.user, req.params.id);
     const [items] = await pool.execute(
@@ -100,7 +100,7 @@ router.get('/:id/files', requireAuth, async (req, res, next) => {
   }
 });
 
-router.get('/:submissionId/files/:fileId/download', requireAuth, async (req, res, next) => {
+router.get('/:submissionId/files/:fileId/download', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     await ensureSubmissionAccess(req.user, req.params.submissionId);
     const [rows] = await pool.execute(

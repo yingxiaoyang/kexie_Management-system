@@ -1,2 +1,2 @@
-project_code,budget_amount,midterm_claim_amount,midterm_actual_amount,stage_claim_amount,stage_actual_amount,remaining_amount,remark
+项目编号,报销额度,中期申报金额,中期实际金额,阶段申报金额,阶段实际金额,剩余额度,备注
 KX2026001,3000.00,1000.00,900.00,1200.00,1100.00,1000.00,报销示例

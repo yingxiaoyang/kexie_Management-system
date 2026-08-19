@@ -16,6 +16,7 @@ import projectRoutes from './routes/projects.js';
 import reportDesignRoutes from './routes/reportDesigns.js';
 import submissionRoutes from './routes/submissions.js';
 import uploadRoutes from './routes/uploads.js';
+import applicationRoutes from './routes/applications.js';
 import { forbidden } from './utils/errors.js';
 
 function originGuard(req, res, next) {
@@ -61,6 +62,7 @@ export function createApp() {
   app.use('/api/uploads', uploadRoutes);
   app.use('/api/material-tasks', materialTaskRoutes);
   app.use('/api/submissions', submissionRoutes);
+  app.use('/api/applications', applicationRoutes);
   app.use('/api/import-templates', importTemplateRoutes);
 
   app.use(notFoundHandler);

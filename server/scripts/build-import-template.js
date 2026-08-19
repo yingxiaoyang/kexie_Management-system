@@ -48,6 +48,42 @@ const fieldDescriptions = {
   remaining_amount: '剩余额度；数字，最多两位小数',
   remark: '备注；可空'
 };
+const fieldLabels = {
+  project_year: '项目所属年度',
+  project_group: '组别',
+  project_code: '项目编号',
+  title: '作品名称',
+  category: '项目类别',
+  approval_date: '立项日期',
+  approval_type: '立项类型',
+  status: '项目状态',
+  person_type: '人员类型',
+  name: '姓名',
+  student_no: '学号',
+  teacher_no: '工号',
+  college: '学院',
+  unit: '单位',
+  phone: '电话',
+  qq: 'QQ',
+  email: '邮箱',
+  account_status: '账号状态',
+  person_identifier: '人员编号',
+  role: '项目身份',
+  is_primary_owner: '是否主要负责人',
+  joined_at: '加入日期',
+  check_phase: '检查阶段',
+  research_log_count: '研究日志数量',
+  rating: '评级',
+  checked_at: '检查日期',
+  budget_amount: '报销额度',
+  midterm_claim_amount: '中期申报金额',
+  midterm_actual_amount: '中期实际金额',
+  stage_claim_amount: '阶段申报金额',
+  stage_actual_amount: '阶段实际金额',
+  remaining_amount: '剩余额度',
+  remark: '备注'
+};
+const fieldByLabel = new Map(Object.entries(fieldLabels).map(([field, label]) => [label, field]));
 
 function parseCsv(text) {
   return text.replace(/^\uFEFF/, '').trimEnd().split(/\r?\n/).map((line) => line.split(','));
@@ -66,15 +102,16 @@ function applyColumnStyles(worksheet, headers, definition) {
   worksheet.views = [{ state: 'frozen', ySplit: 1 }];
   worksheet.autoFilter = { from: 'A1', to: worksheet.getRow(1).getCell(headers.length).address };
   headers.forEach((header, index) => {
+    const fieldName = Object.entries(fieldLabels).find(([, label]) => label === header)?.[0] || header;
     const column = worksheet.getColumn(index + 1);
     column.width = Math.min(42, Math.max(14, header.length + 8));
-    if (definition.textFields.includes(header)) column.numFmt = '@';
-    if (definition.enums[header]) {
+    if (definition.textFields.includes(fieldName)) column.numFmt = '@';
+    if (definition.enums[fieldName]) {
       for (let rowNumber = 2; rowNumber <= 1000; rowNumber += 1) {
         worksheet.getCell(rowNumber, index + 1).dataValidation = {
           type: 'list',
           allowBlank: true,
-          formulae: [`"${definition.enums[header].join(',')}"`]
+          formulae: [`"${definition.enums[fieldName].join(',')}"`]
         };
       }
     }
@@ -83,14 +120,16 @@ function applyColumnStyles(worksheet, headers, definition) {
 
 async function addBusinessSheet(workbook, definition) {
   const csv = parseCsv(await fs.readFile(path.join(templateDir, definition.file), 'utf8'));
-  const headers = csv[0];
+  const originalHeaders = csv[0].map((header) => fieldByLabel.get(header) || header);
+  const headers = originalHeaders.map((header) => fieldLabels[header] || header);
   const worksheet = workbook.addWorksheet(definition.name);
-  csv.forEach((row) => worksheet.addRow(row));
+  worksheet.addRow(headers);
+  csv.slice(1).forEach((row) => worksheet.addRow(row));
   styleHeader(worksheet.getRow(1));
   applyColumnStyles(worksheet, headers, definition);
   for (const row of worksheet.getRows(2, worksheet.rowCount - 1) || []) {
     row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
-      if (definition.textFields.includes(headers[columnNumber - 1])) cell.numFmt = '@';
+      if (definition.textFields.includes(originalHeaders[columnNumber - 1])) cell.numFmt = '@';
       cell.alignment = { vertical: 'middle', wrapText: true };
     });
   }
@@ -117,11 +156,12 @@ function addInstructionSheet(workbook) {
 
 function addDictionarySheet(workbook) {
   const worksheet = workbook.addWorksheet('字段字典');
-  worksheet.addRow(['字段', '说明']);
-  for (const [field, description] of Object.entries(fieldDescriptions)) worksheet.addRow([field, description]);
+  worksheet.addRow(['字段名', '模板表头', '说明']);
+  for (const [field, description] of Object.entries(fieldDescriptions)) worksheet.addRow([field, fieldLabels[field] || field, description]);
   styleHeader(worksheet.getRow(1));
   worksheet.getColumn(1).width = 28;
-  worksheet.getColumn(2).width = 72;
+  worksheet.getColumn(2).width = 24;
+  worksheet.getColumn(3).width = 72;
   worksheet.eachRow((row) => row.eachCell((cell) => {
     cell.alignment = { vertical: 'middle', wrapText: true };
   }));

@@ -74,11 +74,23 @@ function singleSubmissionFile(req, res, next) {
   });
 }
 
+function multipleTaskTemplateFiles(req, res, next) {
+  taskTemplateUploader.array('files', 10)(req, res, async (error) => {
+    if (error) {
+      await removeUploadedFiles([
+        ...(req.file ? [req.file] : []),
+        ...(Array.isArray(req.files) ? req.files : [])
+      ]);
+    }
+    next(error);
+  });
+}
+
 router.post(
   '/task-templates',
   requireAuth,
   requireRole('admin'),
-  taskTemplateUploader.array('files', 10),
+  multipleTaskTemplateFiles,
   async (req, res, next) => {
     let connection;
     let transactionStarted = false;

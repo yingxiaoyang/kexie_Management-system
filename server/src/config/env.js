@@ -151,6 +151,8 @@ export const env = {
     loginWindowMs: readPositiveInteger('LOGIN_RATE_LIMIT_WINDOW_MINUTES', 15) * 60 * 1000,
     loginIpMax: readPositiveInteger('LOGIN_RATE_LIMIT_MAX', 20),
     adminLoginIpMax: readPositiveInteger('ADMIN_LOGIN_RATE_LIMIT_MAX', 10),
+    registrationWindowMs: readPositiveInteger('REGISTRATION_RATE_LIMIT_WINDOW_MINUTES', 60) * 60 * 1000,
+    registrationIpMax: readPositiveInteger('REGISTRATION_RATE_LIMIT_MAX', 8),
     accountFailureLimit: 5,
     accountLockMinutes: readPositiveInteger('ACCOUNT_LOCK_MINUTES', 15),
     adminAccountLockMinutes: readPositiveInteger('ADMIN_ACCOUNT_LOCK_MINUTES', 30)
@@ -159,6 +161,7 @@ export const env = {
     root: path.resolve(__dirname, '../../', process.env.UPLOAD_ROOT || '../storage/uploads'),
     maxFileBytes: readNumber('MAX_UPLOAD_FILE_MB', 50) * 1024 * 1024,
     maxTaskProjectBytes: readNumber('MAX_TASK_PROJECT_UPLOAD_MB', 500) * 1024 * 1024,
+    applicationMaxBytes: readNumber('MAX_APPLICATION_TOTAL_MB', 200) * 1024 * 1024,
     allowedExtensions: readList('ALLOWED_UPLOAD_EXTENSIONS', [
       'pdf',
       'doc',

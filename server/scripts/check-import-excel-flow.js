@@ -56,7 +56,12 @@ async function closeServer() {
 
 async function removeBatch(batchId) {
   if (!batchId) return;
-  await fs.unlink(path.join(batchDir, `${batchId}.json`)).catch(() => undefined);
+  const tempPath = path.join(batchDir, `${batchId}.json`);
+  const batch = await fs.readFile(tempPath, 'utf8').then((text) => JSON.parse(text)).catch(() => null);
+  if (batch?.originalFilePath) {
+    await fs.unlink(path.resolve(env.upload.root, '../imports', batch.originalFilePath)).catch(() => undefined);
+  }
+  await fs.unlink(tempPath).catch(() => undefined);
 }
 
 async function invalidWorkbookBuffer() {

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import mysql from 'mysql2/promise';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertProjectOwnerMigrationReady } from '../src/utils/migrationPreflight.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,6 +41,10 @@ async function main() {
 
     for (const migrationName of migrationFiles) {
       if (applied.has(migrationName)) continue;
+      if (migrationName === '011_application_approval_loop.sql') {
+        await assertProjectOwnerMigrationReady(connection);
+        console.log('011 owner preflight passed: no multiple owners, repeated owners, or formal projects without an owner.');
+      }
       const migrationSql = await fs.readFile(path.join(migrationsDir, migrationName), 'utf8');
       await connection.query(migrationSql);
       await connection.execute('INSERT INTO schema_migrations (migration_name) VALUES (?)', [migrationName]);

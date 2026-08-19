@@ -14,7 +14,13 @@ const textLikeFields = new Set([
   'teacher_no',
   'person_identifier',
   'phone',
-  'qq'
+  'qq',
+  '项目编号',
+  '学号',
+  '工号',
+  '人员编号',
+  '电话',
+  'QQ'
 ]);
 
 function dateText(value) {

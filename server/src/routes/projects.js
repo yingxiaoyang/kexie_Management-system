@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
+import { assertEligibleProjectOwner, assertFormalProjectOwnership, isFormalProjectStatus } from '../utils/projectOwnership.js';
 
 const router = Router();
 const statuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped'];
@@ -27,7 +28,7 @@ function projectPayload(body) {
   };
 }
 
-router.get('/', requireAuth, async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['p.deleted_at IS NULL'];
@@ -87,47 +88,89 @@ router.get('/', requireAuth, async (req, res, next) => {
 });
 
 router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
   try {
     const data = projectPayload(req.body);
-    const [result] = await pool.execute(
+    const ownerPersonId = Number(req.body.ownerPersonId || 0) || null;
+    if (isFormalProjectStatus(data.status) && !ownerPersonId) {
+      throw badRequest('正式状态项目必须选择且只能选择一名负责人', 'FORMAL_PROJECT_OWNER_REQUIRED');
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    if (ownerPersonId) await assertEligibleProjectOwner(connection, ownerPersonId);
+    const [result] = await connection.execute(
       `INSERT INTO projects
        (project_year, project_group, project_code, title, category, approval_date, approval_type, status, remark)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [data.projectYear, data.projectGroup, data.projectCode, data.title, data.category, data.approvalDate, data.approvalType, data.status, data.remark]
     );
+    if (ownerPersonId) {
+      await connection.execute(
+        `INSERT INTO project_participations (project_id, person_id, role, is_primary_owner, joined_at)
+         VALUES (?, ?, 'owner', 1, ?)`,
+        [result.insertId, ownerPersonId, data.approvalDate]
+      );
+    }
+    await assertFormalProjectOwnership(connection, [Number(result.insertId)]);
+    await connection.commit();
     success(res, { id: result.insertId }, 'Project created');
   } catch (error) {
+    await connection?.rollback().catch(() => undefined);
     if (error.code === 'ER_DUP_ENTRY') {
       error.status = 409;
       error.code = 'DUPLICATE_RESOURCE';
-      error.message = 'Project code already exists';
+      error.message = '项目编号或负责人关系与现有数据冲突';
     }
     next(error);
-  }
+  } finally { connection?.release(); }
 });
 
 router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
   try {
     const data = projectPayload(req.body);
-    const [result] = await pool.execute(
+    const ownerPersonId = Number(req.body.ownerPersonId || 0) || null;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [[project]] = await connection.execute('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
+    if (!project) throw notFound('Project not found');
+    const [[currentOwner]] = await connection.execute(
+      "SELECT person_id FROM project_participations WHERE project_id = ? AND role = 'owner' AND deleted_at IS NULL LIMIT 1 FOR UPDATE",
+      [project.id]
+    );
+    if (ownerPersonId && currentOwner && Number(currentOwner.person_id) !== ownerPersonId) {
+      throw badRequest('不能通过项目基础信息接口替换负责人，请使用人员关系变更流程', 'PROJECT_OWNER_CHANGE_REQUIRES_RELATION_FLOW');
+    }
+    if (ownerPersonId && !currentOwner) {
+      await assertEligibleProjectOwner(connection, ownerPersonId, Number(project.id));
+      await connection.execute(
+        `INSERT INTO project_participations (project_id, person_id, role, is_primary_owner, joined_at)
+         VALUES (?, ?, 'owner', 1, ?)`,
+        [project.id, ownerPersonId, data.approvalDate]
+      );
+    }
+    const [result] = await connection.execute(
       `UPDATE projects SET project_year = ?, project_group = ?, project_code = ?, title = ?, category = ?,
        approval_date = ?, approval_type = ?, status = ?, remark = ?, updated_at = NOW()
        WHERE id = ? AND deleted_at IS NULL`,
       [data.projectYear, data.projectGroup, data.projectCode, data.title, data.category, data.approvalDate, data.approvalType, data.status, data.remark, req.params.id]
     );
     if (!result.affectedRows) throw notFound('Project not found');
+    await assertFormalProjectOwnership(connection, [Number(project.id)]);
+    await connection.commit();
     success(res, null, 'Project updated');
   } catch (error) {
+    await connection?.rollback().catch(() => undefined);
     if (error.code === 'ER_DUP_ENTRY') {
       error.status = 409;
       error.code = 'DUPLICATE_RESOURCE';
-      error.message = 'Project code already exists';
+      error.message = '项目编号或负责人关系与现有数据冲突';
     }
     next(error);
-  }
+  } finally { connection?.release(); }
 });
 
-router.get('/:id/participations', requireAuth, async (req, res, next) => {
+router.get('/:id/participations', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
   try {
     if (req.user.role === 'project_owner') {
       const [[allowed]] = await pool.execute(

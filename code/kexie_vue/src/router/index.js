@@ -4,7 +4,17 @@ import { authStore } from '../stores/auth'
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', public: true } },
+  { path: '/register', name: 'register', component: () => import('../views/RegisterView.vue'), meta: { title: '申请人注册', public: true } },
   { path: '/change-password', name: 'change-password', component: () => import('../views/ChangePasswordView.vue'), meta: { title: '修改密码' } },
+  {
+    path: '/applicant',
+    component: () => import('../views/applicant/ApplicantLayout.vue'),
+    redirect: '/applicant/applications',
+    meta: { roles: ['applicant'] },
+    children: [
+      { path: 'applications', name: 'applicant-applications', component: () => import('../views/applicant/ApplicantApplications.vue'), meta: { title: '我的立项申请' } },
+    ],
+  },
   {
     path: '/owner',
     component: () => import('../views/owner/OwnerLayout.vue'),
@@ -25,10 +35,12 @@ const routes = [
     children: [
       { path: 'dashboard', name: 'admin-dashboard', component: () => import('../views/admin/AdminDashboard.vue'), meta: { title: '管理员总览' } },
       { path: 'projects', name: 'admin-projects', component: () => import('../views/admin/AdminProjects.vue'), meta: { title: '项目管理' } },
+      { path: 'imports', name: 'admin-imports', component: () => import('../views/admin/AdminImports.vue'), meta: { title: '数据导入' } },
       { path: 'people', name: 'admin-people', component: () => import('../views/admin/AdminPeople.vue'), meta: { title: '人员库管理' } },
       { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AdminAccounts.vue'), meta: { title: '账号管理' } },
       { path: 'tasks', name: 'admin-tasks', component: () => import('../views/admin/AdminMaterialTasks.vue'), meta: { title: '材料任务' } },
       { path: 'reviews', name: 'admin-reviews', component: () => import('../views/admin/AdminReviews.vue'), meta: { title: '材料审核' } },
+      { path: 'applications', name: 'admin-applications', component: () => import('../views/admin/AdminApplications.vue'), meta: { title: '立项申请管理' } },
       { path: 'archive-templates', name: 'admin-archive-templates', component: () => import('../views/admin/AdminArchiveTemplates.vue'), meta: { title: '归档模板' } },
       { path: 'exports', name: 'admin-exports', component: () => import('../views/admin/AdminExports.vue'), meta: { title: '整理包导出' } },
       { path: 'report-designer', name: 'admin-report-designer', component: () => import('../views/admin/AdminReportDesigner.vue'), meta: { title: '数据报表设计器' } },

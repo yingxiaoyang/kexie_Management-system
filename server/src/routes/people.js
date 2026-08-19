@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
+import { assertFormalProjectOwnership, ownershipProjectIdsForPeople } from '../utils/projectOwnership.js';
 
 const router = Router();
 
@@ -87,19 +88,28 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
 });
 
 router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+  let connection;
   try {
     const data = personPayload(req.body);
-    const [result] = await pool.execute(
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [[person]] = await connection.execute('SELECT id FROM people WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
+    if (!person) throw notFound('Person not found');
+    const [result] = await connection.execute(
       `UPDATE people SET person_type = ?, name = ?, student_no = ?, teacher_no = ?, college = ?, unit = ?,
        phone = ?, qq = ?, email = ?, title = ?, remark = ?, updated_at = NOW()
        WHERE id = ? AND deleted_at IS NULL`,
       [data.personType, data.name, data.studentNo, data.teacherNo, data.college, data.unit, data.phone, data.qq, data.email, data.title, data.remark, req.params.id]
     );
     if (!result.affectedRows) throw notFound('Person not found');
+    const ownedProjectIds = await ownershipProjectIdsForPeople(connection, [Number(person.id)]);
+    await assertFormalProjectOwnership(connection, ownedProjectIds);
+    await connection.commit();
     success(res, null, 'Person updated');
   } catch (error) {
+    await connection?.rollback().catch(() => undefined);
     next(error);
-  }
+  } finally { connection?.release(); }
 });
 
 router.get('/:id/projects', requireAuth, requireRole('admin'), async (req, res, next) => {

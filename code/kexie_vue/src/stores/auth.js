@@ -42,6 +42,8 @@ export const authStore = {
     }
   },
   homeForRole(role = state.user?.role) {
-    return role === 'admin' ? '/admin/dashboard' : '/owner/dashboard'
+    if (role === 'admin') return '/admin/dashboard'
+    if (role === 'applicant') return '/applicant/applications'
+    return '/owner/dashboard'
   },
 }

@@ -4,7 +4,7 @@
       <div class="login-intro">
         <el-tag effect="plain">真实试用版</el-tag>
         <h1>科研项目材料管理平台</h1>
-        <p>管理员负责项目、人员、任务和审核；项目负责人提交材料并处理退回内容。</p>
+        <p>申请人自主注册并提交立项材料；管理员仅审核材料合格性，学校结果导入后才建立正式项目。</p>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
         <el-form-item label="账号" prop="username">
@@ -15,6 +15,7 @@
         </el-form-item>
         <el-alert v-if="errorMessage" :title="errorMessage" type="error" show-icon :closable="false" />
         <el-button class="login-submit" type="primary" size="large" :loading="loading" @click="submit">登录</el-button>
+        <el-button class="login-register" size="large" @click="router.push('/register')">申请人自主注册</el-button>
       </el-form>
       <p class="login-tip">首次登录或管理员重置密码后，系统会要求立即修改密码。</p>
     </section>

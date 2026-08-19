@@ -19,12 +19,17 @@ export async function resolveDownloadFile(rootPath, storedPath, {
     throw forbidden(invalidMessage, invalidCode);
   }
 
-  const rootRealPath = await fs.promises.realpath(rootPath).catch(() => null);
-  if (!rootRealPath) throw notFound('System file directory not found');
-
+  const resolvedRootPath = path.resolve(rootPath);
   const candidatePath = path.isAbsolute(rawPath)
     ? path.resolve(rawPath)
     : path.resolve(rootPath, rawPath);
+  // Reject lexical traversal before touching the filesystem. This preserves the
+  // authorization boundary even when the storage root has not been created yet.
+  if (!isPathInside(resolvedRootPath, candidatePath)) {
+    throw forbidden(invalidMessage, invalidCode);
+  }
+  const rootRealPath = await fs.promises.realpath(rootPath).catch(() => null);
+  if (!rootRealPath) throw notFound('System file directory not found');
   if (!isPathInside(rootRealPath, candidatePath)) {
     throw forbidden(invalidMessage, invalidCode);
   }

@@ -74,6 +74,7 @@ import {
   Folder,
   List,
   Lock,
+  Upload,
   UserFilled,
 } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -88,10 +89,12 @@ const userInitial = computed(() => displayName.value.slice(0, 1))
 const menuItems = [
   { path: '/admin/dashboard', label: '管理总览', icon: DataBoard },
   { path: '/admin/projects', label: '项目管理', icon: Folder },
+  { path: '/admin/imports', label: '数据导入', icon: Upload },
   { path: '/admin/people', label: '人员库', icon: UserFilled },
   { path: '/admin/accounts', label: '账号管理', icon: Avatar },
   { path: '/admin/tasks', label: '材料任务', icon: List },
   { path: '/admin/reviews', label: '材料审核', icon: Checked },
+  { path: '/admin/applications', label: '立项申请', icon: Files },
   { path: '/admin/archive-templates', label: '归档模板', icon: Files },
   { path: '/admin/exports', label: '整理包导出', icon: Download },
   { path: '/admin/report-designer', label: '数据报表', icon: Document },
