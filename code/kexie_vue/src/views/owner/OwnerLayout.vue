@@ -64,7 +64,7 @@
 <script setup>
 import { computed, defineComponent, h, ref } from 'vue'
 import { ElIcon, ElMenu, ElMenuItem } from 'element-plus'
-import { FolderOpened, House, Phone, UploadFilled } from '@element-plus/icons-vue'
+import { EditPen, FolderOpened, House, Phone, UploadFilled } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authStore } from '../../stores/auth'
 
@@ -78,6 +78,7 @@ const menuItems = [
   { path: '/owner/dashboard', label: '工作台', icon: House },
   { path: '/owner/projects', label: '我的项目', icon: FolderOpened },
   { path: '/owner/submissions', label: '材料提交', icon: UploadFilled },
+  { path: '/owner/project-changes', label: '项目变更申请', icon: EditPen },
   { path: '/owner/contacts', label: '项目通讯录', icon: Phone },
 ]
 

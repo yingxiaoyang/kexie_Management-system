@@ -74,7 +74,7 @@ function applicationEventPresentation(eventType, payload) {
   return { summary: summaries[eventType] || payload.summary || payload.reason || eventType, state: exceptionTypes.has(eventType) ? 'exception' : 'completed' };
 }
 
-export function buildProjectTimeline({ project, source, auditEvents = [], applicationEvents = [], importEvents = [], submissions = [], materialReviewEvents = [] }) {
+export function buildProjectTimeline({ project, source, auditEvents = [], applicationEvents = [], importEvents = [], submissions = [], materialReviewEvents = [], projectChangeEvents = [] }) {
   const events = [];
   if (project?.createdAt && !auditEvents.some((event) => event.eventType === 'project_created')) {
     events.push({
@@ -108,7 +108,7 @@ export function buildProjectTimeline({ project, source, auditEvents = [], applic
     events.push({
       id: `project-audit-${row.id}`,
       eventType: row.eventType,
-      eventCategory: row.eventType === 'participations_changed' ? 'participation' : 'project',
+      eventCategory: ['participations_changed', 'project_change_approved'].includes(row.eventType) ? 'participation' : 'project',
       occurredAt: dateValue(row.createdAt),
       actor: row.actorName || null,
       sourceModule: row.sourceModule,
@@ -198,6 +198,26 @@ export function buildProjectTimeline({ project, source, auditEvents = [], applic
       sourceModule: '材料审核',
       summary: summaries[row.eventType] || row.eventType,
       state: row.eventType === 'returned' ? 'exception' : 'completed',
+      legacyDerived: false
+    });
+  }
+  for (const row of projectChangeEvents) {
+    if (row.eventType === 'approved') continue; // 审批生效已由 project_change_approved 项目审计展示，避免重复节点。
+    const payload = jsonValue(row.eventPayload, {});
+    const summary = row.eventType === 'submitted'
+      ? `提交项目变更申请 V${row.versionNo}${payload.summary ? `：${payload.summary}` : ''}`
+      : row.eventType === 'returned'
+        ? `项目变更申请 V${row.versionNo} 被退回${payload.reason ? `：${payload.reason}` : ''}`
+        : `项目变更申请：${row.eventType}`;
+    events.push({
+      id: `project-change-audit-${row.id}`,
+      eventType: `project_change_${row.eventType}`,
+      eventCategory: 'participation',
+      occurredAt: dateValue(row.createdAt),
+      actor: row.actorName || null,
+      sourceModule: '项目变更审批',
+      summary,
+      state: row.eventType === 'returned' ? 'exception' : row.eventType === 'submitted' ? 'current' : 'completed',
       legacyDerived: false
     });
   }
@@ -369,8 +389,16 @@ export async function loadProjectWorkspace(connection, projectId, user) {
      LEFT JOIN users next_assignee ON next_assignee.id = audit.to_assignee_user_id
      WHERE audit.project_id = ? ORDER BY audit.created_at DESC, audit.id DESC`, [projectId]
   );
+  const [projectChangeEvents] = await connection.execute(
+    `SELECT audit.id, audit.version_no AS versionNo, audit.event_type AS eventType,
+            audit.event_payload AS eventPayload, audit.created_at AS createdAt,
+            actor.display_name AS actorName
+     FROM project_change_audit_events audit JOIN users actor ON actor.id = audit.actor_user_id
+     WHERE audit.project_id = ? AND audit.event_type IN ('submitted', 'returned', 'approved')
+     ORDER BY audit.created_at DESC, audit.id DESC`, [projectId]
+  );
   const materials = groupMaterials(taskRows, submissionRows, fileRows);
-  const timeline = buildProjectTimeline({ project, source, auditEvents, applicationEvents, importEvents, submissions: submissionRows, materialReviewEvents });
+  const timeline = buildProjectTimeline({ project, source, auditEvents, applicationEvents, importEvents, submissions: submissionRows, materialReviewEvents, projectChangeEvents });
   const completedMaterials = submissionRows.filter((row) => row.reviewStatus === 'approved').length;
   return {
     project,

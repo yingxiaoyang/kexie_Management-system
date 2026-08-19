@@ -11,6 +11,7 @@ import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
 import { inspectOriginalFileName, setFileResponseHeaders } from '../utils/fileNames.js';
+import { normalizeChangeScope } from '../utils/projectChange.js';
 
 const router = Router();
 const taskStatuses = ['draft', 'published', 'closed'];
@@ -32,6 +33,12 @@ function normalizedExtensions(value, fallback = defaultExtensions) {
 }
 
 function taskPayload(body) {
+  const taskType = enumValue(body.taskType, ['standard', 'project_change'], 'taskType', 'standard');
+  const changePhase = taskType === 'project_change' ? enumValue(body.changePhase, ['midterm', 'stage'], 'changePhase') : null;
+  const changeScope = taskType === 'project_change' ? normalizeChangeScope(body.changeScope) : null;
+  if (taskType === 'project_change' && !Object.values(changeScope).some(Boolean)) {
+    throw badRequest('项目信息变更任务必须至少允许一类变更', 'PROJECT_CHANGE_SCOPE_REQUIRED');
+  }
   const projectScopeType = enumValue(body.projectScopeType, scopeTypes, 'projectScopeType', 'all');
   const parentExtensions = normalizedExtensions(body.allowedExtensions);
   const parentMaxFileMb = Number(body.maxFileMb || 50);
@@ -72,6 +79,9 @@ function taskPayload(body) {
   const projectIds = projectScopeType === 'custom' ? [...new Set((body.projectIds || []).map(Number).filter(Number.isInteger))] : [];
   if (projectScopeType === 'custom' && !projectIds.length) throw badRequest('At least one project is required for custom scope', 'VALIDATION_ERROR');
   return {
+    taskType,
+    changePhase,
+    changeScope,
     taskName: requiredText(body.taskName, 'taskName', 160),
     taskDescription: nullableText(body.taskDescription, 1000),
     projectScopeType,
@@ -220,6 +230,7 @@ router.get('/', requireAuth, requireRole('admin'), requireAdminPermission('mater
               mt.project_group AS projectGroup, mt.deadline_at AS deadlineAt,
               mt.allowed_extensions AS allowedExtensions, mt.max_file_mb AS maxFileMb,
               mt.max_task_project_mb AS maxTaskProjectMb, mt.has_template AS hasTemplate,
+              mt.task_type AS taskType, mt.change_phase AS changePhase, mt.change_scope AS changeScope,
               mt.status, mt.created_at AS createdAt,
               GROUP_CONCAT(DISTINCT mc.category_name ORDER BY mc.sort_order SEPARATOR '、') AS categoryNames,
               COUNT(DISTINCT tta.id) AS templateCount,
@@ -235,6 +246,7 @@ router.get('/', requireAuth, requireRole('admin'), requireAdminPermission('mater
     );
     const baseItems = rows.map((row) => ({
       ...row,
+      changeScope: parseJson(row.changeScope, null),
       hasTemplate: Boolean(row.hasTemplate),
       submissionCount: Number(row.submissionCount || 0),
       pendingCount: Number(row.pendingCount || 0),
@@ -252,7 +264,7 @@ router.get('/my', requireAuth, requireRole('project_owner'), async (req, res, ne
     const personId = req.user.personId || 0;
     const [rows] = await pool.execute(
       `SELECT mt.id AS taskId, mt.task_name AS taskName, mt.task_description AS taskDescription,
-              mt.deadline_at AS deadlineAt,
+              mt.deadline_at AS deadlineAt, mt.task_type AS taskType, mt.change_phase AS changePhase, mt.change_scope AS changeScope,
               COALESCE(mc.allowed_extensions, mt.allowed_extensions) AS allowedExtensions,
               COALESCE(mc.max_file_mb, mt.max_file_mb) AS maxFileMb,
               mt.max_task_project_mb AS maxTaskProjectMb,
@@ -270,7 +282,7 @@ router.get('/my', requireAuth, requireRole('project_owner'), async (req, res, ne
               ) ELSE 0 END AS templateCount
        FROM project_participations owner_rel
        JOIN projects p ON p.id = owner_rel.project_id AND p.deleted_at IS NULL
-       JOIN material_tasks mt ON mt.deleted_at IS NULL AND mt.status IN ('published', 'closed')
+       JOIN material_tasks mt ON mt.deleted_at IS NULL AND mt.task_type = 'standard' AND mt.status IN ('published', 'closed')
          AND (
            mt.project_scope_type = 'all'
            OR (mt.project_scope_type = 'year' AND mt.project_year = p.project_year)
@@ -292,6 +304,7 @@ router.get('/my', requireAuth, requireRole('project_owner'), async (req, res, ne
     );
     success(res, rows.map((row) => ({
       ...row,
+      changeScope: parseJson(row.changeScope, null),
       allowedExtensions: Array.isArray(row.allowedExtensions) ? row.allowedExtensions : JSON.parse(row.allowedExtensions || '[]'),
       hasTemplate: Boolean(row.hasTemplate),
       isRequired: Boolean(row.isRequired),
@@ -311,10 +324,11 @@ router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('mate
     await connection.beginTransaction();
     const [result] = await connection.execute(
       `INSERT INTO material_tasks
-       (task_name, task_description, project_scope_type, project_year, project_group, deadline_at,
+       (task_name, task_description, task_type, change_phase, change_scope, project_scope_type, project_year, project_group, deadline_at,
         allowed_extensions, max_file_mb, max_task_project_mb, has_template, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [data.taskName, data.taskDescription, data.projectScopeType, data.projectYear, data.projectGroup, data.deadlineAt,
+       VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [data.taskName, data.taskDescription, data.taskType, data.changePhase, data.changeScope ? JSON.stringify(data.changeScope) : null,
+        data.projectScopeType, data.projectYear, data.projectGroup, data.deadlineAt,
         JSON.stringify(data.allowedExtensions), data.maxFileMb, data.maxTaskProjectMb, data.hasTemplate ? 1 : 0, data.status, req.user.id]
     );
     const savedFileTasks = [];
@@ -347,8 +361,9 @@ router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('ma
     const data = taskPayload(req.body);
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const [[task]] = await connection.execute('SELECT id, status FROM material_tasks WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
+    const [[task]] = await connection.execute('SELECT id, status, task_type AS taskType FROM material_tasks WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
     if (!task) throw notFound('Material task not found');
+    if (task.taskType !== data.taskType) throw badRequest('任务类型创建后不可切换', 'MATERIAL_TASK_TYPE_IMMUTABLE');
     const [[submission]] = await connection.execute('SELECT id FROM material_submissions WHERE material_task_id = ? AND deleted_at IS NULL LIMIT 1', [req.params.id]);
     if (submission) throw badRequest('已有提交记录的统筹任务不能再修改', 'TASK_ALREADY_HAS_SUBMISSIONS');
     if (task.status === 'closed') throw badRequest('已关闭任务请重新开放后再修改', 'VALIDATION_ERROR');
@@ -378,10 +393,11 @@ router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('ma
     );
     const hasTemplate = Number(commonTemplateRow.total) > 0 || data.fileTasks.some((item) => item.hasTemplate);
     await connection.execute(
-      `UPDATE material_tasks SET task_name=?, task_description=?, project_scope_type=?, project_year=?, project_group=?,
+      `UPDATE material_tasks SET task_name=?, task_description=?, task_type=?, change_phase=?, change_scope=CAST(? AS JSON), project_scope_type=?, project_year=?, project_group=?,
        deadline_at=?, allowed_extensions=?, max_file_mb=?, max_task_project_mb=?, has_template=?, status=?, updated_at=NOW()
        WHERE id=?`,
-      [data.taskName, data.taskDescription, data.projectScopeType, data.projectYear, data.projectGroup,
+      [data.taskName, data.taskDescription, data.taskType, data.changePhase, data.changeScope ? JSON.stringify(data.changeScope) : null,
+        data.projectScopeType, data.projectYear, data.projectGroup,
         data.deadlineAt, JSON.stringify(data.allowedExtensions), data.maxFileMb, data.maxTaskProjectMb,
         hasTemplate ? 1 : 0, data.status, req.params.id]
     );

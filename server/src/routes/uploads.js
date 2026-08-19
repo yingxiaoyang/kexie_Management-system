@@ -185,7 +185,7 @@ router.post(
 
       const [[context]] = await connection.execute(
         `SELECT mt.id AS taskId, mt.status AS taskStatus, mt.project_scope_type AS scopeType,
-                mt.project_year AS taskYear, mt.project_group AS taskGroup,
+                mt.project_year AS taskYear, mt.project_group AS taskGroup, mt.task_type AS taskType,
                 COALESCE(mc.allowed_extensions, mt.allowed_extensions) AS allowedExtensions,
                 COALESCE(mc.max_file_mb, mt.max_file_mb) AS maxFileMb,
                 mt.max_task_project_mb AS maxTaskProjectMb,
@@ -207,6 +207,9 @@ router.post(
       );
       if (!context) throw notFound('Material task or project not found');
       if (!context.categoryId) throw notFound('Material category not found');
+      if (context.taskType === 'project_change') {
+        throw badRequest('项目信息变更必须填写结构化方案并通过专用入口提交', 'PROJECT_CHANGE_STRUCTURED_SUBMISSION_REQUIRED');
+      }
       if (!context.ownsProject) throw forbidden('You are not the owner of this project');
       if (context.taskStatus !== 'published') throw badRequest('Material task is not open for submission', 'VALIDATION_ERROR');
       const inScope = context.scopeType === 'all'

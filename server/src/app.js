@@ -18,6 +18,7 @@ import submissionRoutes from './routes/submissions.js';
 import uploadRoutes from './routes/uploads.js';
 import applicationRoutes from './routes/applications.js';
 import participationRuleRoutes from './routes/participationRules.js';
+import projectChangeRoutes from './routes/projectChanges.js';
 import { forbidden } from './utils/errors.js';
 
 function originGuard(req, res, next) {
@@ -66,6 +67,7 @@ export function createApp() {
   app.use('/api/applications', applicationRoutes);
   app.use('/api/import-templates', importTemplateRoutes);
   app.use('/api/participation-rules', participationRuleRoutes);
+  app.use('/api/project-changes', projectChangeRoutes);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

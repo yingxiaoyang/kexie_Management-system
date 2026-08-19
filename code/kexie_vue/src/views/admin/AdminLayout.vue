@@ -74,6 +74,7 @@ import {
   Folder,
   List,
   Lock,
+  EditPen,
   Upload,
   UserFilled,
 } from '@element-plus/icons-vue'
@@ -95,6 +96,7 @@ const menuItems = [
   { path: '/admin/accounts', label: '账号管理', icon: Avatar, superAdmin: true },
   { path: '/admin/tasks', label: '材料任务', icon: List, permission: 'material_task' },
   { path: '/admin/reviews', label: '材料审核', icon: Checked, permission: 'material_review' },
+  { path: '/admin/project-changes', label: '项目变更审批', icon: EditPen, permission: 'material_review' },
   { path: '/admin/applications', label: '立项申请', icon: Files, permission: 'application_management' },
   { path: '/admin/archive-templates', label: '归档模板', icon: Files, permission: 'archive_management' },
   { path: '/admin/exports', label: '整理包导出', icon: Download, permission: 'archive_management' },

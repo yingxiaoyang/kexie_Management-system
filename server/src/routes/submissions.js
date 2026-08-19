@@ -12,6 +12,7 @@ import { success } from '../utils/response.js';
 import { requireAdminPermission, requirePermissionWhenAdmin, requireSuperAdmin } from '../utils/adminPermissions.js';
 import { filePreviewInfo, inspectOriginalFileName, matchesPreviewSignature, setFileResponseHeaders } from '../utils/fileNames.js';
 import { expectedAssignmentVersion, parseSubmissionIds, sanitizeZipSegment, uniqueZipEntryName } from '../utils/materialReview.js';
+import { reviewProjectChangeSubmission } from '../services/projectChangeService.js';
 
 const router = Router();
 
@@ -294,7 +295,8 @@ router.get('/', requireAuth, requireRole('admin', 'project_owner'), requirePermi
               ms.return_reason AS returnReason, ms.submitted_at AS submittedAt,
               ms.assigned_to AS assignedTo, assignee.display_name AS assigneeName,
               ms.assigned_by AS assignedBy, assigner.display_name AS assignerName, ms.assigned_at AS assignedAt,
-              ms.assignment_version AS assignmentVersion,
+              ms.assignment_version AS assignmentVersion, mt.task_type AS taskType,
+              pcr.id AS changeRequestId, pcr.current_version AS changeVersion,
               ms.reviewed_by AS reviewedBy, reviewer.display_name AS reviewerName, ms.reviewed_at AS reviewedAt,
               COUNT(mf.id) AS fileCount, COALESCE(SUM(mf.file_size), 0) AS totalFileSize
        FROM material_submissions ms
@@ -305,6 +307,7 @@ router.get('/', requireAuth, requireRole('admin', 'project_owner'), requirePermi
        LEFT JOIN users assignee ON assignee.id = ms.assigned_to
        LEFT JOIN users assigner ON assigner.id = ms.assigned_by
        LEFT JOIN users reviewer ON reviewer.id = ms.reviewed_by
+       LEFT JOIN project_change_requests pcr ON pcr.latest_submission_id = ms.id
        LEFT JOIN material_files mf ON mf.submission_id = ms.id AND mf.deleted_at IS NULL
        WHERE ${where}
        GROUP BY ms.id ORDER BY ms.submitted_at DESC, ms.id DESC LIMIT ${pageSize} OFFSET ${offset}`,
@@ -336,9 +339,11 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermi
     await connection.beginTransaction();
     transactionActive = true;
     const [[submission]] = await connection.execute(
-      `SELECT id, project_id AS projectId, review_status AS reviewStatus,
-              assigned_to AS assignedTo, assignment_version AS assignmentVersion
-       FROM material_submissions WHERE id = ? AND deleted_at IS NULL LIMIT 1 FOR UPDATE`,
+      `SELECT ms.id, ms.project_id AS projectId, ms.review_status AS reviewStatus,
+              ms.assigned_to AS assignedTo, ms.assignment_version AS assignmentVersion,
+              mt.task_type AS taskType
+       FROM material_submissions ms JOIN material_tasks mt ON mt.id = ms.material_task_id
+       WHERE ms.id = ? AND ms.deleted_at IS NULL LIMIT 1 FOR UPDATE`,
       [req.params.id]
     );
     if (!submission) throw notFound('材料提交记录不存在');
@@ -363,6 +368,12 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermi
     if (updated.affectedRows !== 1) {
       throw conflict('该材料已被其他管理员审核或改派，请刷新列表后重试', 'MATERIAL_REVIEW_CONFLICT');
     }
+    let projectChange = null;
+    if (submission.taskType === 'project_change') {
+      projectChange = await reviewProjectChangeSubmission(connection, {
+        submissionId: submission.id, action, reason, reviewer: req.user, expectedAssignmentVersion: expectedVersion
+      });
+    }
     await connection.execute(
       `INSERT INTO material_review_audit_events
        (submission_id, project_id, event_type, actor_user_id, from_assignee_user_id,
@@ -373,7 +384,7 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermi
     );
     await connection.commit();
     transactionActive = false;
-    success(res, { reviewerId: req.user.id, reviewerName: req.user.displayName, reviewStatus }, action === 'approve' ? '材料审核已通过' : '材料已退回');
+    success(res, { reviewerId: req.user.id, reviewerName: req.user.displayName, reviewStatus, projectChange }, action === 'approve' ? '材料审核已通过' : '材料已退回');
   } catch (error) {
     if (connection && transactionActive) await connection.rollback().catch(() => undefined);
     next(error);

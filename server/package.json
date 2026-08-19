@@ -20,6 +20,8 @@
     "check:project-workspace-db": "node scripts/check-project-workspace-db.js",
     "check:material-review": "node scripts/check-material-review.js",
     "check:material-review-db": "node scripts/check-material-review-db.js",
+    "check:project-change": "node scripts/check-project-change.js",
+    "check:project-change-db": "node scripts/check-project-change-db.js",
     "check:archive": "node scripts/check-archive-flow.js",
     "check:archive-tree": "node scripts/check-archive-tree-flow.js",
     "check:archive-queue": "node scripts/check-archive-queue-flow.js",

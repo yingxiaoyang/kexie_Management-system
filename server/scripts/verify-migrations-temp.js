@@ -37,7 +37,7 @@ try {
 
   const migrationsDir = path.join(projectRoot, 'database', 'migrations');
   const migrations = (await fs.readdir(migrationsDir)).filter((name) => /^\d+_.+\.sql$/i.test(name)).sort();
-  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014']);
+  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015']);
   for (const migration of migrations) {
     if (migration === '011_application_approval_loop.sql') {
       const [firstPerson] = await database.execute(
@@ -166,12 +166,32 @@ try {
     [databaseName]
   );
   assert.equal(Number(assignmentColumns.total), 4, '014 must add all assignment columns');
+  const [[changeTables]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN
+       ('project_change_requests', 'project_change_draft_files', 'project_change_versions', 'project_change_audit_events')`,
+    [databaseName]
+  );
+  assert.equal(Number(changeTables.total), 4, '015 must add project change request, file, version and audit tables');
+  const [[taskChangeColumns]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'material_tasks' AND COLUMN_NAME IN ('task_type', 'change_phase', 'change_scope')`,
+    [databaseName]
+  );
+  assert.equal(Number(taskChangeColumns.total), 3, '015 must add material task type, check phase and allowed change scope');
+  await database.execute(
+    `INSERT INTO material_tasks
+     (task_name, task_type, change_phase, change_scope, project_scope_type, status, created_by)
+     VALUES ('迁移验证变更任务', 'project_change', 'midterm', JSON_OBJECT('members', true, 'advisors', true, 'owner', true), 'all', 'published', ?)`,
+    [superAdmin.insertId]
+  );
 
   process.stdout.write(`Temporary schema verified: ${Number(tableCount.total)} tables, ${Number(columnCount.total)} columns.\n`);
   process.stdout.write('Owner invariant transaction checks passed.\n');
   process.stdout.write('Single-super and limited-administrator permission checks passed.\n');
   process.stdout.write('Project workspace audit migration checks passed.\n');
   process.stdout.write('Material review assignment migration checks passed.\n');
+  process.stdout.write('Project change approval migration checks passed.\n');
 } finally {
   await database?.end().catch(() => undefined);
   if (admin && created) await admin.query(`DROP DATABASE \`${databaseName}\``);
