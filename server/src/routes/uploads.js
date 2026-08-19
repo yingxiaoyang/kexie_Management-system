@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { badRequest, forbidden, notFound } from '../utils/errors.js';
 import { success } from '../utils/response.js';
 
@@ -90,6 +91,7 @@ router.post(
   '/task-templates',
   requireAuth,
   requireRole('admin'),
+  requireAdminPermission('material_task'),
   multipleTaskTemplateFiles,
   async (req, res, next) => {
     let connection;

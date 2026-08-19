@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { archivePlacements, archivePreview, normalizeArchiveTemplateConfig } from '../utils/archive.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom, requiredText } from '../utils/query.js';
@@ -43,7 +44,7 @@ async function validateTaskReferences(templateConfig) {
   }
 }
 
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, requireRole('admin'), requireAdminPermission('archive_management'));
 
 router.get('/task-library', async (_req, res, next) => {
   try {

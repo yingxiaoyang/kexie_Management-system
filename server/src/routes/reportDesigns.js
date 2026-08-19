@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
@@ -53,7 +54,7 @@ function mapExport(row) {
   };
 }
 
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, requireRole('admin'), requireAdminPermission('report_management'));
 
 router.get('/fields', (_req, res) => {
   success(res, REPORT_FIELD_GROUPS.map((group) => ({

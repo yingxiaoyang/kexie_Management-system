@@ -5,6 +5,7 @@ import mysql from 'mysql2/promise';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertProjectOwnerMigrationReady } from '../src/utils/migrationPreflight.js';
+import { executeMigrationSql } from '../src/utils/migrationSql.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,7 +47,7 @@ async function main() {
         console.log('011 owner preflight passed: no multiple owners, repeated owners, or formal projects without an owner.');
       }
       const migrationSql = await fs.readFile(path.join(migrationsDir, migrationName), 'utf8');
-      await connection.query(migrationSql);
+      await executeMigrationSql(connection, migrationSql);
       await connection.execute('INSERT INTO schema_migrations (migration_name) VALUES (?)', [migrationName]);
       console.log(`Applied migration: ${migrationName}`);
     }
@@ -55,18 +56,37 @@ async function main() {
     const password = process.env.INITIAL_ADMIN_PASSWORD || 'ChangeMe123!';
     const passwordHash = await bcrypt.hash(password, 12);
 
-    await connection.execute(
-      `INSERT INTO users (username, display_name, password_hash, role, status, password_reset_required)
-       VALUES (?, '系统管理员', ?, 'admin', 'enabled', 1)
-       ON DUPLICATE KEY UPDATE
-         display_name = VALUES(display_name),
-         role = VALUES(role),
-         status = VALUES(status)`,
-      [username, passwordHash]
+    const [[superAdmin]] = await connection.execute(
+      `SELECT id, username FROM users
+       WHERE role = 'admin' AND admin_level = 'super' AND deleted_at IS NULL LIMIT 1`
     );
+    if (superAdmin) {
+      await connection.execute(
+        `UPDATE users SET display_name = '系统管理员', status = 'enabled', updated_at = NOW()
+         WHERE id = ?`,
+        [superAdmin.id]
+      );
+      if (superAdmin.username !== username) {
+        console.log(`The sole super administrator already exists as: ${superAdmin.username}`);
+      }
+    } else {
+      const [[conflictingUser]] = await connection.execute(
+        'SELECT id FROM users WHERE username = ? LIMIT 1',
+        [username]
+      );
+      if (conflictingUser) {
+        throw new Error('INITIAL_ADMIN_USERNAME is already used by a non-super account; refusing to replace it.');
+      }
+      await connection.execute(
+        `INSERT INTO users
+         (username, display_name, password_hash, role, admin_level, status, password_reset_required)
+         VALUES (?, '系统管理员', ?, 'admin', 'super', 'enabled', 1)`,
+        [username, passwordHash]
+      );
+    }
 
     console.log('Database initialized and migrations are up to date.');
-    console.log(`Initial admin username: ${username}`);
+    console.log(`Configured initial admin username: ${username}`);
     console.log('Initial admin password is read from INITIAL_ADMIN_PASSWORD in server/.env.');
   } finally {
     await connection.end();

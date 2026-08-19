@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertFormalProjectOwnership } from '../src/utils/projectOwnership.js';
 import { assertProjectOwnerMigrationReady } from '../src/utils/migrationPreflight.js';
+import { executeMigrationSql } from '../src/utils/migrationSql.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..', '..');
@@ -36,7 +37,7 @@ try {
 
   const migrationsDir = path.join(projectRoot, 'database', 'migrations');
   const migrations = (await fs.readdir(migrationsDir)).filter((name) => /^\d+_.+\.sql$/i.test(name)).sort();
-  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011']);
+  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012']);
   for (const migration of migrations) {
     if (migration === '011_application_approval_loop.sql') {
       const [firstPerson] = await database.execute(
@@ -65,9 +66,38 @@ try {
       process.stdout.write('011 legacy-owner preflight checks passed.\n');
     }
     const sql = await fs.readFile(path.join(migrationsDir, migration), 'utf8');
-    await database.query(sql);
+    await executeMigrationSql(database, sql);
     process.stdout.write(`Applied ${migration}\n`);
   }
+
+  const passwordHash = '$2a$04$abcdefghijklmnopqrstuuuuuuuuuuuuuuuuuuuuuuuuuuuuu';
+  const [superAdmin] = await database.execute(
+    `INSERT INTO users (username, display_name, password_hash, role, admin_level, status, password_reset_required)
+     VALUES ('verify_super', '迁移验证超级管理员', ?, 'admin', 'super', 'enabled', 0)`,
+    [passwordHash]
+  );
+  await assert.rejects(
+    () => database.execute(
+      `INSERT INTO users (username, display_name, password_hash, role, admin_level, status, password_reset_required)
+       VALUES ('verify_super_2', '第二个超级管理员', ?, 'admin', 'super', 'enabled', 0)`,
+      [passwordHash]
+    ),
+    /Duplicate entry/
+  );
+  await assert.rejects(
+    () => database.execute("UPDATE users SET status = 'disabled' WHERE id = ?", [superAdmin.insertId]),
+    /sole super administrator/
+  );
+  const [limitedAdmin] = await database.execute(
+    `INSERT INTO users (username, display_name, password_hash, role, admin_level, status, password_reset_required)
+     VALUES ('verify_limited', '迁移验证小管理员', ?, 'admin', 'limited', 'enabled', 0)`,
+    [passwordHash]
+  );
+  await database.execute(
+    `INSERT INTO admin_user_permissions (user_id, permission_key, granted_by)
+     VALUES (?, 'material_review', ?)`,
+    [limitedAdmin.insertId, superAdmin.insertId]
+  );
 
   const [[tableCount]] = await database.execute(
     `SELECT COUNT(*) AS total FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'`,
@@ -105,6 +135,7 @@ try {
 
   process.stdout.write(`Temporary schema verified: ${Number(tableCount.total)} tables, ${Number(columnCount.total)} columns.\n`);
   process.stdout.write('Owner invariant transaction checks passed.\n');
+  process.stdout.write('Single-super and limited-administrator permission checks passed.\n');
 } finally {
   await database?.end().catch(() => undefined);
   if (admin && created) await admin.query(`DROP DATABASE \`${databaseName}\``);

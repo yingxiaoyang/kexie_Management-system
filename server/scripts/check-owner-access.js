@@ -71,11 +71,19 @@ async function createUser(username, displayName, role, personId = null) {
   const hash = await bcrypt.hash(password, 4);
   const [result] = await pool.execute(
     `INSERT INTO users
-       (username, display_name, password_hash, role, status, person_id, password_reset_required)
-     VALUES (?, ?, ?, ?, 'enabled', ?, 0)`,
-    [username, displayName, hash, role, personId]
+       (username, display_name, password_hash, role, admin_level, status, person_id, password_reset_required)
+     VALUES (?, ?, ?, ?, ?, 'enabled', ?, 0)`,
+    [username, displayName, hash, role, role === 'admin' ? 'limited' : null, personId]
   );
   const id = Number(result.insertId);
+  if (role === 'admin') {
+    for (const permissionKey of ['project_management', 'material_task', 'material_review']) {
+      await pool.execute(
+        'INSERT INTO admin_user_permissions (user_id, permission_key, granted_by) VALUES (?, ?, ?)',
+        [id, permissionKey, id]
+      );
+    }
+  }
   created.users.push(id);
   return { id, username };
 }
@@ -405,6 +413,7 @@ try {
     await pool.execute(`DELETE FROM material_tasks WHERE id IN (${created.tasks.map(() => '?').join(',')})`, created.tasks);
   }
   if (created.users.length) {
+    await pool.execute(`DELETE FROM admin_user_permissions WHERE user_id IN (${created.users.map(() => '?').join(',')})`, created.users);
     await pool.execute(`DELETE FROM users WHERE id IN (${created.users.map(() => '?').join(',')})`, created.users);
   }
   if (created.projects.length) {

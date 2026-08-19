@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { createApp } from '../src/app.js';
 import { env } from '../src/config/env.js';
 import { pool } from '../src/db/pool.js';
+import { signUserToken } from '../src/utils/authSession.js';
 
 const oldPassword = 'AuthCheck!123';
 const changedPassword = 'AuthChanged!456';
@@ -50,7 +51,7 @@ async function createUser(label, passwordResetRequired = false) {
   const [result] = await pool.execute(
     `INSERT INTO users
        (username, display_name, password_hash, role, status, password_reset_required)
-     VALUES (?, ?, ?, 'admin', 'enabled', ?)`,
+     VALUES (?, ?, ?, 'project_owner', 'enabled', ?)`,
     [username, `认证检查-${label}`, hash, passwordResetRequired ? 1 : 0]
   );
   const id = Number(result.insertId);
@@ -78,8 +79,14 @@ async function main() {
   });
   apiBase = `http://127.0.0.1:${server.address().port}/api`;
 
-  const admin = await createUser('admin');
-  const adminCookie = await login(admin);
+  const [[superAdmin]] = await pool.execute(
+    `SELECT id, username, role, token_version
+     FROM users
+     WHERE role = 'admin' AND admin_level = 'super' AND status = 'enabled'
+       AND password_reset_required = 0 AND deleted_at IS NULL LIMIT 1`
+  );
+  assert(superAdmin, 'Authentication check requires the initialized super administrator with completed first-login password change');
+  const adminCookie = `${env.authCookie.name}=${signUserToken(superAdmin)}`;
 
   const firstLogin = await createUser('first_login', true);
   const firstCookie = await login(firstLogin);
@@ -130,7 +137,7 @@ async function main() {
 
   const roleChanged = await createUser('role_changed');
   const roleCookie = await login(roleChanged);
-  await pool.execute("UPDATE users SET role = 'project_owner' WHERE id = ?", [roleChanged.id]);
+  await pool.execute("UPDATE users SET role = 'applicant' WHERE id = ?", [roleChanged.id]);
   await expectStatus('/auth/me', { cookie: roleCookie }, 401, 'UNAUTHORIZED');
 
   console.log(JSON.stringify({

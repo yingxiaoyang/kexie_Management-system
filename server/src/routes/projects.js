@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
 import { assertEligibleProjectOwner, assertFormalProjectOwnership, isFormalProjectStatus } from '../utils/projectOwnership.js';
+import { requireAdminPermission, requirePermissionWhenAdmin } from '../utils/adminPermissions.js';
 
 const router = Router();
 const statuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped'];
@@ -28,7 +29,7 @@ function projectPayload(body) {
   };
 }
 
-router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('project_management'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['p.deleted_at IS NULL'];
@@ -87,7 +88,7 @@ router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, 
   }
 });
 
-router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('project_management'), async (req, res, next) => {
   let connection;
   try {
     const data = projectPayload(req.body);
@@ -125,7 +126,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   } finally { connection?.release(); }
 });
 
-router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('project_management'), async (req, res, next) => {
   let connection;
   try {
     const data = projectPayload(req.body);
@@ -170,7 +171,7 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => 
   } finally { connection?.release(); }
 });
 
-router.get('/:id/participations', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/:id/participations', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('project_management'), async (req, res, next) => {
   try {
     if (req.user.role === 'project_owner') {
       const [[allowed]] = await pool.execute(

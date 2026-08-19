@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { notFound } from '../utils/errors.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
 
@@ -20,7 +21,7 @@ const files = {
 
 const router = Router();
 
-router.get('/:type/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:type/download', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const fileName = files[req.params.type];
     if (!fileName) throw notFound('Import template not found');

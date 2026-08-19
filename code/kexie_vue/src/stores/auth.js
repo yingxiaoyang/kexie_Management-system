@@ -41,6 +41,13 @@ export const authStore = {
       persist(null)
     }
   },
+  isSuperAdmin(user = state.user) {
+    return user?.role === 'admin' && user?.adminLevel === 'super'
+  },
+  hasPermission(permissionKey, user = state.user) {
+    if (user?.role !== 'admin') return false
+    return user.adminLevel === 'super' || (user.adminLevel === 'limited' && user.permissions?.includes(permissionKey))
+  },
   homeForRole(role = state.user?.role) {
     if (role === 'admin') return '/admin/dashboard'
     if (role === 'applicant') return '/applicant/applications'

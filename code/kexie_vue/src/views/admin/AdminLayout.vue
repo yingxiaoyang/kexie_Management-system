@@ -5,7 +5,7 @@
         <div class="brand-mark">科</div>
         <div class="brand-copy">
           <p class="brand-title">科研项目管理</p>
-          <p class="brand-subtitle">管理员工作台</p>
+          <p class="brand-subtitle">{{ adminLevelLabel }}</p>
         </div>
       </div>
       <AdminMenu />
@@ -85,21 +85,26 @@ const router = useRouter()
 const drawerVisible = ref(false)
 const displayName = computed(() => authStore.state.user?.displayName || '管理员')
 const userInitial = computed(() => displayName.value.slice(0, 1))
+const adminLevelLabel = computed(() => authStore.isSuperAdmin() ? '超级管理员工作台' : '管理员工作台')
 
 const menuItems = [
   { path: '/admin/dashboard', label: '管理总览', icon: DataBoard },
-  { path: '/admin/projects', label: '项目管理', icon: Folder },
-  { path: '/admin/imports', label: '数据导入', icon: Upload },
-  { path: '/admin/people', label: '人员库', icon: UserFilled },
-  { path: '/admin/accounts', label: '账号管理', icon: Avatar },
-  { path: '/admin/tasks', label: '材料任务', icon: List },
-  { path: '/admin/reviews', label: '材料审核', icon: Checked },
-  { path: '/admin/applications', label: '立项申请', icon: Files },
-  { path: '/admin/archive-templates', label: '归档模板', icon: Files },
-  { path: '/admin/exports', label: '整理包导出', icon: Download },
-  { path: '/admin/report-designer', label: '数据报表', icon: Document },
-  { path: '/admin/rules', label: '参与规则', icon: Lock },
+  { path: '/admin/projects', label: '项目管理', icon: Folder, permission: 'project_management' },
+  { path: '/admin/imports', label: '数据导入', icon: Upload, permission: 'data_import' },
+  { path: '/admin/people', label: '人员库', icon: UserFilled, permission: 'people_management' },
+  { path: '/admin/accounts', label: '账号管理', icon: Avatar, superAdmin: true },
+  { path: '/admin/tasks', label: '材料任务', icon: List, permission: 'material_task' },
+  { path: '/admin/reviews', label: '材料审核', icon: Checked, permission: 'material_review' },
+  { path: '/admin/applications', label: '立项申请', icon: Files, permission: 'application_management' },
+  { path: '/admin/archive-templates', label: '归档模板', icon: Files, permission: 'archive_management' },
+  { path: '/admin/exports', label: '整理包导出', icon: Download, permission: 'archive_management' },
+  { path: '/admin/report-designer', label: '数据报表', icon: Document, permission: 'report_management' },
+  { path: '/admin/rules', label: '参与规则', icon: Lock, permission: 'participation_rules' },
 ]
+const visibleMenuItems = computed(() => menuItems.filter((item) => {
+  if (item.superAdmin) return authStore.isSuperAdmin()
+  return !item.permission || authStore.hasPermission(item.permission)
+}))
 
 const AdminMenu = defineComponent({
   emits: ['select'],
@@ -109,7 +114,7 @@ const AdminMenu = defineComponent({
       router: true,
       class: 'drawer-menu',
       onSelect: () => emit('select'),
-    }, () => menuItems.map((item) => h(ElMenuItem, { index: item.path }, {
+    }, () => visibleMenuItems.value.map((item) => h(ElMenuItem, { index: item.path }, {
       default: () => [h(ElIcon, null, () => h(item.icon)), h('span', item.label)],
     })))
   },

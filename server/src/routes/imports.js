@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { EXCEL_LIMITS, readWorkbook, worksheetRows, xlsxBuffer } from '../utils/excel.js';
 import { affectedProjectIds, assertFormalProjectOwnership, isFormalProjectStatus, ownershipProjectIdsForPeople } from '../utils/projectOwnership.js';
@@ -1485,7 +1486,7 @@ async function commitStandardWorkbook(batch, userId) {
   }
 }
 
-router.get('/field-options', requireAuth, requireRole('admin'), async (_req, res, next) => {
+router.get('/field-options', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (_req, res, next) => {
   try {
     const modules = [
       {
@@ -1514,7 +1515,7 @@ router.get('/field-options', requireAuth, requireRole('admin'), async (_req, res
   }
 });
 
-router.get('/templates/:type/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/templates/:type/download', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     let headers;
     let rows = [];
@@ -1545,7 +1546,7 @@ router.get('/templates/:type/download', requireAuth, requireRole('admin'), async
   }
 });
 
-router.post('/standard-workbook/validate', requireAuth, requireRole('admin'), upload.single('file'), async (req, res, next) => {
+router.post('/standard-workbook/validate', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), upload.single('file'), async (req, res, next) => {
   let savedFile;
   let batchId;
   try {
@@ -1580,7 +1581,7 @@ router.post('/standard-workbook/validate', requireAuth, requireRole('admin'), up
   }
 });
 
-router.post('/:type/validate', requireAuth, requireRole('admin'), upload.single('file'), async (req, res, next) => {
+router.post('/:type/validate', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), upload.single('file'), async (req, res, next) => {
   try {
     const data = await validateSimplifiedImport(req.params.type, req.file, req.user.id);
     success(res, data, '预检查完成');
@@ -1589,7 +1590,7 @@ router.post('/:type/validate', requireAuth, requireRole('admin'), upload.single(
   }
 });
 
-router.post('/:batchId/commit', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/:batchId/commit', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     if (await permanentBatchExists(req.params.batchId)) {
       const summary = await commitPlannedBatch(req.params.batchId, req.user.id);
@@ -1609,7 +1610,7 @@ router.post('/:batchId/commit', requireAuth, requireRole('admin'), async (req, r
   }
 });
 
-router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 20)));
@@ -1646,7 +1647,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.get('/:batchId', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:batchId', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const connection = await pool.getConnection();
     try {
@@ -1675,7 +1676,7 @@ router.get('/:batchId', requireAuth, requireRole('admin'), async (req, res, next
   }
 });
 
-router.get('/:batchId/original/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:batchId/original/download', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const [[batch]] = await pool.execute('SELECT original_file_name, original_file_path FROM import_batches WHERE batch_uuid = ?', [req.params.batchId]);
     if (!batch?.original_file_path) throw notFound('原始文件不存在');
@@ -1689,7 +1690,7 @@ router.get('/:batchId/original/download', requireAuth, requireRole('admin'), asy
   }
 });
 
-router.get('/:batchId/errors/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:batchId/errors/download', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     let errors;
     if (await permanentBatchExists(req.params.batchId)) {
@@ -1710,7 +1711,7 @@ router.get('/:batchId/errors/download', requireAuth, requireRole('admin'), async
   }
 });
 
-router.get('/:batchId/diff/download', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:batchId/diff/download', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const [[batch]] = await pool.execute('SELECT id FROM import_batches WHERE batch_uuid = ?', [req.params.batchId]);
     if (!batch) throw notFound('导入记录不存在');
@@ -1734,7 +1735,7 @@ router.get('/:batchId/diff/download', requireAuth, requireRole('admin'), async (
   }
 });
 
-router.post('/:batchId/rollback', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/:batchId/rollback', requireAuth, requireRole('admin'), requireAdminPermission('data_import'), async (req, res, next) => {
   try {
     const result = await rollbackBatch(req.params.batchId, req.user.id);
     success(res, result, '回滚完成');

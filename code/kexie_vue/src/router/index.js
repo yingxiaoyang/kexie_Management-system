@@ -34,17 +34,17 @@ const routes = [
     meta: { roles: ['admin'] },
     children: [
       { path: 'dashboard', name: 'admin-dashboard', component: () => import('../views/admin/AdminDashboard.vue'), meta: { title: '管理员总览' } },
-      { path: 'projects', name: 'admin-projects', component: () => import('../views/admin/AdminProjects.vue'), meta: { title: '项目管理' } },
-      { path: 'imports', name: 'admin-imports', component: () => import('../views/admin/AdminImports.vue'), meta: { title: '数据导入' } },
-      { path: 'people', name: 'admin-people', component: () => import('../views/admin/AdminPeople.vue'), meta: { title: '人员库管理' } },
-      { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AdminAccounts.vue'), meta: { title: '账号管理' } },
-      { path: 'tasks', name: 'admin-tasks', component: () => import('../views/admin/AdminMaterialTasks.vue'), meta: { title: '材料任务' } },
-      { path: 'reviews', name: 'admin-reviews', component: () => import('../views/admin/AdminReviews.vue'), meta: { title: '材料审核' } },
-      { path: 'applications', name: 'admin-applications', component: () => import('../views/admin/AdminApplications.vue'), meta: { title: '立项申请管理' } },
-      { path: 'archive-templates', name: 'admin-archive-templates', component: () => import('../views/admin/AdminArchiveTemplates.vue'), meta: { title: '归档模板' } },
-      { path: 'exports', name: 'admin-exports', component: () => import('../views/admin/AdminExports.vue'), meta: { title: '整理包导出' } },
-      { path: 'report-designer', name: 'admin-report-designer', component: () => import('../views/admin/AdminReportDesigner.vue'), meta: { title: '数据报表设计器' } },
-      { path: 'rules', name: 'admin-rules', component: () => import('../views/admin/AdminRules.vue'), meta: { title: '参与规则' } },
+      { path: 'projects', name: 'admin-projects', component: () => import('../views/admin/AdminProjects.vue'), meta: { title: '项目管理', permission: 'project_management' } },
+      { path: 'imports', name: 'admin-imports', component: () => import('../views/admin/AdminImports.vue'), meta: { title: '数据导入', permission: 'data_import' } },
+      { path: 'people', name: 'admin-people', component: () => import('../views/admin/AdminPeople.vue'), meta: { title: '人员库管理', permission: 'people_management' } },
+      { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AdminAccounts.vue'), meta: { title: '账号管理', superAdmin: true } },
+      { path: 'tasks', name: 'admin-tasks', component: () => import('../views/admin/AdminMaterialTasks.vue'), meta: { title: '材料任务', permission: 'material_task' } },
+      { path: 'reviews', name: 'admin-reviews', component: () => import('../views/admin/AdminReviews.vue'), meta: { title: '材料审核', permission: 'material_review' } },
+      { path: 'applications', name: 'admin-applications', component: () => import('../views/admin/AdminApplications.vue'), meta: { title: '立项申请管理', permission: 'application_management' } },
+      { path: 'archive-templates', name: 'admin-archive-templates', component: () => import('../views/admin/AdminArchiveTemplates.vue'), meta: { title: '归档模板', permission: 'archive_management' } },
+      { path: 'exports', name: 'admin-exports', component: () => import('../views/admin/AdminExports.vue'), meta: { title: '整理包导出', permission: 'archive_management' } },
+      { path: 'report-designer', name: 'admin-report-designer', component: () => import('../views/admin/AdminReportDesigner.vue'), meta: { title: '数据报表设计器', permission: 'report_management' } },
+      { path: 'rules', name: 'admin-rules', component: () => import('../views/admin/AdminRules.vue'), meta: { title: '参与规则', permission: 'participation_rules' } },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/' },
@@ -74,6 +74,8 @@ router.beforeEach(async (to) => {
   if (!authStore.state.user.passwordResetRequired && to.path === '/change-password') return authStore.homeForRole()
   const roles = to.matched.flatMap((record) => record.meta.roles || [])
   if (roles.length && !roles.includes(authStore.state.user.role)) return authStore.homeForRole()
+  if (to.meta.superAdmin && !authStore.isSuperAdmin()) return '/admin/dashboard'
+  if (to.meta.permission && !authStore.hasPermission(to.meta.permission)) return '/admin/dashboard'
   return true
 })
 

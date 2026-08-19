@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission, requirePermissionWhenAdmin } from '../utils/adminPermissions.js';
 import { archivePlacements, normalizeArchiveTemplateConfig } from '../utils/archive.js';
 import { ensureMaterialTaskAccess } from '../utils/accessControl.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
@@ -184,7 +185,7 @@ async function ensureRemovedFileTasksAreUnused(fileTaskIds) {
   }
 }
 
-router.get('/options', requireAuth, requireRole('admin'), async (_req, res, next) => {
+router.get('/options', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (_req, res, next) => {
   try {
     const [[years], [groups], [projects]] = await Promise.all([
       pool.execute('SELECT DISTINCT project_year AS value FROM projects WHERE deleted_at IS NULL ORDER BY project_year DESC'),
@@ -197,7 +198,7 @@ router.get('/options', requireAuth, requireRole('admin'), async (_req, res, next
   }
 });
 
-router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['mt.deleted_at IS NULL'];
@@ -295,7 +296,7 @@ router.get('/my', requireAuth, requireRole('project_owner'), async (req, res, ne
   }
 });
 
-router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (req, res, next) => {
   let connection;
   try {
     const data = taskPayload(req.body);
@@ -333,7 +334,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (req, res, next) => {
   let connection;
   try {
     const data = taskPayload(req.body);
@@ -425,7 +426,7 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => 
   }
 });
 
-router.patch('/:id/status', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.patch('/:id/status', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (req, res, next) => {
   try {
     const status = enumValue(req.body.status, taskStatuses, 'status');
     const [result] = await pool.execute('UPDATE material_tasks SET status = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL', [status, req.params.id]);
@@ -436,7 +437,7 @@ router.patch('/:id/status', requireAuth, requireRole('admin'), async (req, res, 
   }
 });
 
-router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_task'), async (req, res, next) => {
   try {
     const categoryId = optionalPositiveInteger(req.query.categoryId, 'categoryId');
     await ensureMaterialTaskAccess(req.user, req.params.taskId, {
@@ -466,7 +467,7 @@ router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owne
   }
 });
 
-router.get('/:taskId/templates/:attachmentId/download', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/:taskId/templates/:attachmentId/download', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_task'), async (req, res, next) => {
   try {
     const [rows] = await pool.execute(
       `SELECT tta.original_name, tta.storage_path, tta.material_category_id AS categoryId

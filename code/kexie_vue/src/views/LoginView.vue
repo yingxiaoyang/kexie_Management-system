@@ -7,8 +7,8 @@
         <p>申请人自主注册并提交立项材料；管理员仅审核材料合格性，学校结果导入后才建立正式项目。</p>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
-        <el-form-item label="账号" prop="username">
-          <el-input v-model.trim="form.username" size="large" autocomplete="username" placeholder="请输入账号" />
+        <el-form-item label="账号/学号" prop="username">
+          <el-input v-model.trim="form.username" size="large" autocomplete="username" placeholder="请输入账号或学号" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" size="large" type="password" show-password autocomplete="current-password" placeholder="请输入密码" @keyup.enter="submit" />
@@ -39,7 +39,7 @@ const loginErrorMessages = {
   LOGIN_RATE_LIMITED: '登录尝试过于频繁，请稍后再试',
 }
 const rules = {
-  username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入账号或学号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 

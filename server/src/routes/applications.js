@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission, requirePermissionWhenAdmin } from '../utils/adminPermissions.js';
 import { badRequest, forbidden, notFound } from '../utils/errors.js';
 import { paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
@@ -23,6 +24,8 @@ import {
 } from '../utils/applicationWorkflow.js';
 
 const router = Router();
+const requireApplicationAdminPermission = requireAdminPermission('application_management');
+const requireApplicationPermissionWhenAdmin = requirePermissionWhenAdmin('application_management');
 const allowedBatchStatuses = new Set(['draft', 'open', 'closed']);
 const allowedExtensions = new Set(env.upload.allowedExtensions);
 
@@ -181,7 +184,7 @@ router.get('/batches/open', requireAuth, requireRole('applicant'), async (req, r
   } catch (error) { next(error); }
 });
 
-router.get('/batches', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/batches', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   try {
     const [items] = await pool.execute(
       `SELECT ab.id, ab.batch_name AS batchName, ab.application_year AS applicationYear,
@@ -201,7 +204,7 @@ router.get('/batches', requireAuth, requireRole('admin'), async (req, res, next)
   } catch (error) { next(error); }
 });
 
-router.post('/batches', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/batches', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     const data = batchPayload(req.body);
@@ -225,7 +228,7 @@ router.post('/batches', requireAuth, requireRole('admin'), async (req, res, next
   } finally { connection?.release(); }
 });
 
-router.get('/batches/:id', requireAuth, async (req, res, next) => {
+router.get('/batches/:id', requireAuth, requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   try {
     if (!['admin', 'applicant'].includes(req.user.role)) throw forbidden('No permission to access application batches');
     const [[batch]] = await pool.execute(
@@ -252,7 +255,7 @@ router.get('/batches/:id', requireAuth, async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.put('/batches/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.put('/batches/:id', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     const data = batchPayload(req.body);
@@ -278,7 +281,7 @@ router.put('/batches/:id', requireAuth, requireRole('admin'), async (req, res, n
   finally { connection?.release(); }
 });
 
-router.post('/batches/:id/requirements/:requirementId/template', requireAuth, requireRole('admin'), singleUpload(applicationUploader), async (req, res, next) => {
+router.post('/batches/:id/requirements/:requirementId/template', requireAuth, requireRole('admin'), requireApplicationAdminPermission, singleUpload(applicationUploader), async (req, res, next) => {
   let connection;
   try {
     if (!req.file) throw badRequest('file is required');
@@ -313,7 +316,7 @@ router.post('/batches/:id/requirements/:requirementId/template', requireAuth, re
   finally { connection?.release(); }
 });
 
-router.get('/batches/:id/requirements/:requirementId/template/download', requireAuth, async (req, res, next) => {
+router.get('/batches/:id/requirements/:requirementId/template/download', requireAuth, requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   try {
     if (!['admin', 'applicant'].includes(req.user.role)) throw forbidden('No permission to download application templates');
     const [[template]] = await pool.execute(
@@ -332,7 +335,7 @@ router.get('/batches/:id/requirements/:requirementId/template/download', require
   } catch (error) { next(error); }
 });
 
-router.patch('/batches/:id/status', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.patch('/batches/:id/status', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     const nextStatus = String(req.body.status || '');
@@ -464,7 +467,7 @@ router.post('/:id/materials/:requirementId', requireAuth, requireRole('applicant
   } finally { connection?.release(); }
 });
 
-router.get('/:id/materials', requireAuth, async (req, res, next) => {
+router.get('/:id/materials', requireAuth, requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   let connection;
   try {
     connection = await pool.getConnection();
@@ -493,7 +496,7 @@ router.get('/:id/materials', requireAuth, async (req, res, next) => {
   finally { connection?.release(); }
 });
 
-router.get('/:id/materials/:fileId/download', requireAuth, async (req, res, next) => {
+router.get('/:id/materials/:fileId/download', requireAuth, requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   let connection;
   try {
     connection = await pool.getConnection();
@@ -555,7 +558,7 @@ router.post('/:id/withdraw', requireAuth, requireRole('applicant'), async (req, 
   finally { connection?.release(); }
 });
 
-router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['1=1'];
@@ -579,7 +582,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-router.post('/:id/review', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/:id/review', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     const result = String(req.body.result || '');
@@ -713,7 +716,7 @@ async function recoverFailedExport(exportId, user, ip, failureReason) {
   ]);
 }
 
-router.post('/batches/:id/export', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/batches/:id/export', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   let exportId;
   try {
@@ -772,7 +775,7 @@ router.post('/batches/:id/export', requireAuth, requireRole('admin'), async (req
   } finally { connection?.release(); }
 });
 
-router.get('/exports', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/exports', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   try {
     const [items] = await pool.execute(
       `SELECT aer.id, aer.export_no AS exportNo, aer.status, aer.application_count AS applicationCount,
@@ -784,7 +787,7 @@ router.get('/exports', requireAuth, requireRole('admin'), async (req, res, next)
   } catch (error) { next(error); }
 });
 
-router.get('/exports/:id/download/:kind', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/exports/:id/download/:kind', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   try {
     const [[record]] = await pool.execute('SELECT * FROM application_export_records WHERE id = ? AND status = \'ready\' LIMIT 1', [req.params.id]);
     if (!record) throw notFound('Export not found');
@@ -795,7 +798,7 @@ router.get('/exports/:id/download/:kind', requireAuth, requireRole('admin'), asy
   } catch (error) { next(error); }
 });
 
-router.post('/exports/:id/recall', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/exports/:id/recall', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     const reason = String(req.body.reason || '').trim();
@@ -866,7 +869,7 @@ async function readOfficialRows(filePath) {
   return rows;
 }
 
-router.post('/batches/:id/results/validate', requireAuth, requireRole('admin'), singleUpload(officialUploader), async (req, res, next) => {
+router.post('/batches/:id/results/validate', requireAuth, requireRole('admin'), requireApplicationAdminPermission, singleUpload(officialUploader), async (req, res, next) => {
   try {
     if (!req.file) throw badRequest('file is required');
     const [[batch]] = await pool.execute('SELECT * FROM application_batches WHERE id = ? AND deleted_at IS NULL LIMIT 1', [req.params.id]);
@@ -915,7 +918,7 @@ router.post('/batches/:id/results/validate', requireAuth, requireRole('admin'), 
   } catch (error) { await unlinkQuiet(req.file?.path); next(error); }
 });
 
-router.post('/batches/:id/results/manual', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/batches/:id/results/manual', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let filePath;
   try {
     const supplied = Array.isArray(req.body.rows) ? req.body.rows : [req.body];
@@ -997,7 +1000,7 @@ async function ensureProjectForResult(connection, { batch, row, personId, applic
   return Number(project.id);
 }
 
-router.post('/result-imports/:id/commit', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/result-imports/:id/commit', requireAuth, requireRole('admin'), requireApplicationAdminPermission, async (req, res, next) => {
   let connection;
   try {
     connection = await pool.getConnection();
@@ -1062,7 +1065,7 @@ router.post('/result-imports/:id/commit', requireAuth, requireRole('admin'), asy
   } finally { connection?.release(); }
 });
 
-router.get('/projects/:projectId/source', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/projects/:projectId/source', requireAuth, requireRole('admin', 'project_owner'), requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   try {
     if (req.user.role === 'project_owner') {
       const [[owned]] = await pool.execute("SELECT 1 FROM project_participations WHERE project_id = ? AND person_id = ? AND role = 'owner' AND deleted_at IS NULL LIMIT 1", [req.params.projectId, req.user.personId]);
@@ -1082,7 +1085,7 @@ router.get('/projects/:projectId/source', requireAuth, requireRole('admin', 'pro
   } catch (error) { next(error); }
 });
 
-router.get('/:id/audit', requireAuth, async (req, res, next) => {
+router.get('/:id/audit', requireAuth, requireApplicationPermissionWhenAdmin, async (req, res, next) => {
   let connection;
   try {
     connection = await pool.getConnection();

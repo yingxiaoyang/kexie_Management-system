@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { env } from '../config/env.js';
 import { pool } from '../db/pool.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom } from '../utils/query.js';
 import { success } from '../utils/response.js';
@@ -29,7 +30,7 @@ function mapRecord(row) {
   };
 }
 
-router.use(requireAuth, requireRole('admin'));
+router.use(requireAuth, requireRole('admin'), requireAdminPermission('archive_management'));
 
 router.get('/options', async (_req, res, next) => {
   try {

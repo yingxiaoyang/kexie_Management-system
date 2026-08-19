@@ -5,6 +5,7 @@ import { badRequest, notFound } from '../utils/errors.js';
 import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
 import { assertFormalProjectOwnership, ownershipProjectIdsForPeople } from '../utils/projectOwnership.js';
+import { requireAdminPermission } from '../utils/adminPermissions.js';
 
 const router = Router();
 
@@ -27,7 +28,7 @@ function personPayload(body) {
   };
 }
 
-router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin'), requireAdminPermission('people_management'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['pe.deleted_at IS NULL'];
@@ -67,7 +68,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('people_management'), async (req, res, next) => {
   try {
     const data = personPayload(req.body);
     const [result] = await pool.execute(
@@ -87,7 +88,7 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('people_management'), async (req, res, next) => {
   let connection;
   try {
     const data = personPayload(req.body);
@@ -112,7 +113,7 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res, next) => 
   } finally { connection?.release(); }
 });
 
-router.get('/:id/projects', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.get('/:id/projects', requireAuth, requireRole('admin'), requireAdminPermission('people_management'), async (req, res, next) => {
   try {
     const [items] = await pool.execute(
       `SELECT p.id, p.project_code AS projectCode, p.title, p.project_year AS projectYear,

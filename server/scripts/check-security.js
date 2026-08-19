@@ -61,9 +61,9 @@ async function createUser(label, role = 'project_owner') {
   const hash = await bcrypt.hash(password, 4);
   const [result] = await pool.execute(
     `INSERT INTO users
-       (username, display_name, password_hash, role, status, password_reset_required)
-     VALUES (?, ?, ?, ?, 'enabled', 0)`,
-    [username, `安全检查-${label}`, hash, role]
+       (username, display_name, password_hash, role, admin_level, status, password_reset_required)
+     VALUES (?, ?, ?, ?, ?, 'enabled', 0)`,
+    [username, `安全检查-${label}`, hash, role, role === 'admin' ? 'limited' : null]
   );
   const user = { id: Number(result.insertId), username, role };
   createdUserIds.push(user.id);
@@ -266,6 +266,7 @@ try {
   console.error = originalError;
   if (createdUserIds.length) {
     const placeholders = createdUserIds.map(() => '?').join(', ');
+    await pool.execute(`DELETE FROM admin_user_permissions WHERE user_id IN (${placeholders})`, createdUserIds);
     await pool.execute(`DELETE FROM users WHERE id IN (${placeholders})`, createdUserIds);
   }
   if (server) await new Promise((resolve) => server.close(resolve));

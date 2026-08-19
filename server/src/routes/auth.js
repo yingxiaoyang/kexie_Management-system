@@ -8,6 +8,7 @@ import { clearAuthCookie, setAuthCookie, signUserToken } from '../utils/authSess
 import { badRequest, locked, tooManyRequests, unauthorized } from '../utils/errors.js';
 import { success } from '../utils/response.js';
 import { logSecurityEvent } from '../utils/securityLog.js';
+import { loadAdminPermissions, normalizeStudentNumber } from '../utils/adminPermissions.js';
 
 const router = Router();
 
@@ -54,18 +55,14 @@ router.post('/register', registrationIpLimiter, async (req, res, next) => {
   let connection;
   let transactionActive = false;
   try {
-    const username = registrationText(req.body?.username, 'username', 40);
-    const studentNo = registrationText(req.body?.studentNo, 'studentNo', 40);
+    const studentNo = normalizeStudentNumber(registrationText(req.body?.studentNo, 'studentNo', 40));
     const name = registrationText(req.body?.name, 'name', 80);
     const college = registrationText(req.body?.college, 'college', 120);
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     const phone = typeof req.body?.phone === 'string' ? req.body.phone.trim() || null : null;
     const email = typeof req.body?.email === 'string' ? req.body.email.trim() || null : null;
-    if (!/^[A-Za-z0-9_.-]{4,40}$/.test(username)) {
-      throw badRequest('Username may only contain letters, numbers, dot, underscore and hyphen', 'VALIDATION_ERROR');
-    }
     if (!/^[A-Za-z0-9-]{4,40}$/.test(studentNo)) {
-      throw badRequest('Student number format is invalid', 'VALIDATION_ERROR');
+      throw badRequest('学号格式不正确，仅支持 4–40 位字母、数字和连字符', 'VALIDATION_ERROR');
     }
     if (password.length < 10 || password.length > 72 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
       throw badRequest('Password must be 10-72 characters and contain letters and numbers', 'VALIDATION_ERROR');
@@ -81,26 +78,74 @@ router.post('/register', registrationIpLimiter, async (req, res, next) => {
     connection = await pool.getConnection();
     await connection.beginTransaction();
     transactionActive = true;
-    const [[existing]] = await connection.execute(
-      `SELECT 1 FROM users WHERE username = ?
-       UNION ALL SELECT 1 FROM people WHERE student_no = ? LIMIT 1`,
-      [username, studentNo]
+    const [[person]] = await connection.execute(
+      `SELECT id, name, student_no, account_status, deleted_at
+       FROM people
+       WHERE student_no = ? AND person_type = 'student'
+       LIMIT 1 FOR UPDATE`,
+      [studentNo]
     );
-    if (existing) {
-      const error = badRequest('Student number or username already exists', 'DUPLICATE_RESOURCE');
+    const [[usernameUser]] = await connection.execute(
+      'SELECT id, person_id, deleted_at FROM users WHERE username = ? LIMIT 1 FOR UPDATE',
+      [studentNo]
+    );
+    if (usernameUser) {
+      const error = badRequest('该学号已注册账号，请直接登录或联系管理员', 'STUDENT_NUMBER_REGISTERED');
       error.status = 409;
       throw error;
     }
-    const [personResult] = await connection.execute(
-      `INSERT INTO people (person_type, name, student_no, college, phone, email, account_status)
-       VALUES ('student', ?, ?, ?, ?, ?, 'enabled')`,
-      [name, studentNo, college, phone, email]
-    );
+    let personId;
+    if (person) {
+      if (person.deleted_at) {
+        const error = badRequest('该学号存在已归档人员记录，请联系管理员核实并恢复', 'STUDENT_RECORD_ARCHIVED');
+        error.status = 409;
+        throw error;
+      }
+      if (String(person.name).trim() !== name) {
+        const error = badRequest('学号已存在，但姓名与人员库不一致，请联系管理员核实', 'PERSON_INFO_MISMATCH');
+        error.status = 409;
+        throw error;
+      }
+      const [[boundUser]] = await connection.execute(
+        'SELECT id, role FROM users WHERE person_id = ? LIMIT 1 FOR UPDATE',
+        [person.id]
+      );
+      if (boundUser) {
+        const error = badRequest('该学号对应的人员已绑定账号，请直接登录或联系管理员', 'PERSON_ACCOUNT_ALREADY_BOUND');
+        error.status = 409;
+        throw error;
+      }
+      const [[ownerRelation]] = await connection.execute(
+        `SELECT project_id FROM project_participations
+         WHERE person_id = ? AND role = 'owner' AND deleted_at IS NULL LIMIT 1`,
+        [person.id]
+      );
+      if (ownerRelation) {
+        const error = badRequest('该学号已是项目负责人，请联系管理员开通负责人账号', 'STUDENT_ALREADY_PROJECT_OWNER');
+        error.status = 409;
+        throw error;
+      }
+      personId = Number(person.id);
+      await connection.execute(
+        `UPDATE people
+         SET college = COALESCE(college, ?), phone = COALESCE(phone, ?), email = COALESCE(email, ?),
+             account_status = 'enabled', updated_at = NOW()
+         WHERE id = ?`,
+        [college, phone, email, personId]
+      );
+    } else {
+      const [personResult] = await connection.execute(
+        `INSERT INTO people (person_type, name, student_no, college, phone, email, account_status)
+         VALUES ('student', ?, ?, ?, ?, ?, 'enabled')`,
+        [name, studentNo, college, phone, email]
+      );
+      personId = Number(personResult.insertId);
+    }
     const [userResult] = await connection.execute(
       `INSERT INTO users
        (username, display_name, password_hash, role, status, person_id, password_reset_required)
        VALUES (?, ?, ?, 'applicant', 'enabled', ?, 0)`,
-      [username, name, passwordHash, personResult.insertId]
+      [studentNo, person ? person.name : name, passwordHash, personId]
     );
     await connection.commit();
     transactionActive = false;
@@ -110,8 +155,8 @@ router.post('/register', registrationIpLimiter, async (req, res, next) => {
     if (connection && transactionActive) await connection.rollback().catch(() => undefined);
     if (error.code === 'ER_DUP_ENTRY') {
       error.status = 409;
-      error.code = 'DUPLICATE_RESOURCE';
-      error.message = 'Student number or username already exists';
+      error.code = 'STUDENT_NUMBER_REGISTERED';
+      error.message = '该学号已注册账号，请直接登录或联系管理员';
     }
     next(error);
   } finally {
@@ -125,6 +170,8 @@ function publicUser(user) {
     username: user.username,
     displayName: user.display_name ?? user.displayName,
     role: user.role,
+    adminLevel: user.admin_level ?? user.adminLevel ?? null,
+    permissions: Array.isArray(user.permissions) ? user.permissions : [],
     status: user.status,
     personId: user.person_id ?? user.personId ?? null,
     passwordResetRequired: Boolean(user.password_reset_required ?? user.passwordResetRequired)
@@ -239,8 +286,11 @@ router.post('/login', loginIpLimiter, identifyLoginAccount, applyAdminLoginLimit
     await connection.commit();
     transactionActive = false;
 
+    const permissions = user.role === 'admin' && user.admin_level === 'limited'
+      ? await loadAdminPermissions(user.id)
+      : [];
     setAuthCookie(res, signUserToken(user));
-    success(res, { user: publicUser(user) });
+    success(res, { user: publicUser({ ...user, permissions }) });
   } catch (error) {
     if (connection && transactionActive) {
       try {
@@ -294,8 +344,11 @@ router.post('/change-password', requireAuth, async (req, res, next) => {
     if (!result.affectedRows) throw unauthorized('Login has expired');
 
     const [[updatedUser]] = await pool.execute('SELECT * FROM users WHERE id = ? LIMIT 1', [user.id]);
+    const permissions = updatedUser.role === 'admin' && updatedUser.admin_level === 'limited'
+      ? await loadAdminPermissions(updatedUser.id)
+      : [];
     setAuthCookie(res, signUserToken(updatedUser));
-    success(res, { user: publicUser(updatedUser) }, 'Password changed');
+    success(res, { user: publicUser({ ...updatedUser, permissions }) }, 'Password changed');
   } catch (error) {
     next(error);
   }

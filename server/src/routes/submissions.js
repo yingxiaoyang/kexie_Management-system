@@ -7,10 +7,11 @@ import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { badRequest, notFound } from '../utils/errors.js';
 import { paginationFrom } from '../utils/query.js';
 import { success } from '../utils/response.js';
+import { requireAdminPermission, requirePermissionWhenAdmin } from '../utils/adminPermissions.js';
 
 const router = Router();
 
-router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_review'), async (req, res, next) => {
   try {
     const { page, pageSize, offset } = paginationFrom(req.query);
     const conditions = ['ms.deleted_at IS NULL'];
@@ -64,7 +65,7 @@ router.get('/', requireAuth, requireRole('admin', 'project_owner'), async (req, 
   }
 });
 
-router.patch('/:id/review', requireAuth, requireRole('admin'), async (req, res, next) => {
+router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermission('material_review'), async (req, res, next) => {
   try {
     const action = req.body.action;
     if (!['approve', 'return'].includes(action)) throw badRequest('action is invalid', 'VALIDATION_ERROR');
@@ -85,7 +86,7 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), async (req, res, 
   }
 });
 
-router.get('/:id/files', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/:id/files', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_review'), async (req, res, next) => {
   try {
     await ensureSubmissionAccess(req.user, req.params.id);
     const [items] = await pool.execute(
@@ -100,7 +101,7 @@ router.get('/:id/files', requireAuth, requireRole('admin', 'project_owner'), asy
   }
 });
 
-router.get('/:submissionId/files/:fileId/download', requireAuth, requireRole('admin', 'project_owner'), async (req, res, next) => {
+router.get('/:submissionId/files/:fileId/download', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_review'), async (req, res, next) => {
   try {
     await ensureSubmissionAccess(req.user, req.params.submissionId);
     const [rows] = await pool.execute(
