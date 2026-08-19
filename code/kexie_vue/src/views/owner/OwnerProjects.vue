@@ -8,7 +8,7 @@ import { apiRequest } from '../../services/http'
 import { useRouter } from 'vue-router'
 const projects = ref([]), loading = ref(false)
 const router = useRouter()
-const statusLabel = (v) => ({ draft: '草稿', active: '进行中', checking: '检查中', completed: '已结项', archived: '已归档', stopped: '已停止' }[v] || v)
+const statusLabel = (v) => ({ draft: '草稿', active: '进行中', checking: '检查中', completed: '已结项', archived: '已归档', stopped: '已停止（旧）', terminated: '已终止' }[v] || v)
 async function load() { loading.value = true; try { projects.value = (await apiRequest('/projects?pageSize=100')).data } catch (e) { ElMessage.error(e.message) } finally { loading.value = false } }
 function openWorkspace(row) { router.push(`/owner/projects/${row.id}`) }
 onMounted(load)

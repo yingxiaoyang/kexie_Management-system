@@ -14,6 +14,7 @@ import { paginationFrom, requiredText } from '../utils/query.js';
 import { success } from '../utils/response.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { assertFormalProjectOwnership } from '../utils/projectOwnership.js';
+import { assertPeopleEligibleForYear } from '../services/participationEligibilityService.js';
 import {
   appendApplicationAudit,
   assertApplicationTransition,
@@ -28,6 +29,23 @@ const requireApplicationAdminPermission = requireAdminPermission('application_ma
 const requireApplicationPermissionWhenAdmin = requirePermissionWhenAdmin('application_management');
 const allowedBatchStatuses = new Set(['draft', 'open', 'closed']);
 const allowedExtensions = new Set(env.upload.allowedExtensions);
+
+async function assertApplicationParticipationEligible(connection, applicantPersonId, applicationYear, data = {}) {
+  const list = (value) => Array.isArray(value) ? value : String(value || '').split(/[,，;；、\s]+/);
+  const rawPersonIds = data.memberPersonIds ?? data.member_person_ids ?? data['成员人员ID'];
+  const rawStudentNos = data.memberStudentNos ?? data.member_student_nos ?? data['成员学号'];
+  const personIds = [Number(applicantPersonId), ...list(rawPersonIds).map(Number).filter((id) => Number.isSafeInteger(id) && id > 0)];
+  const studentNos = [...new Set(list(rawStudentNos).map((value) => String(value || '').trim().toUpperCase()).filter(Boolean))];
+  if (studentNos.length) {
+    const [members] = await connection.execute(
+      `SELECT id FROM people WHERE person_type = 'student' AND deleted_at IS NULL
+       AND student_no IN (${studentNos.map(() => '?').join(',')})`, studentNos
+    );
+    if (members.length !== studentNos.length) throw badRequest('申请中的成员学号存在未登记学生', 'APPLICATION_MEMBER_NOT_FOUND');
+    personIds.push(...members.map((row) => Number(row.id)));
+  }
+  await assertPeopleEligibleForYear(connection, personIds, Number(applicationYear), '立项申请');
+}
 
 function uploadDirectory(category) {
   const now = new Date();
@@ -392,6 +410,7 @@ router.post('/', requireAuth, requireRole('applicant'), async (req, res, next) =
     );
     if (owner) throw forbidden('A current formal project owner cannot submit another application', 'FORMAL_OWNER_CANNOT_APPLY');
     const data = validateApplicationData(req.body.applicationData || {}, normalizeApplicationSchema(batch.application_schema));
+    await assertApplicationParticipationEligible(connection, req.user.personId, batch.application_year, data);
     const [result] = await connection.execute(
       `INSERT INTO project_applications
        (application_batch_id, applicant_user_id, applicant_person_id, status, application_data)
@@ -417,6 +436,7 @@ router.put('/:id', requireAuth, requireRole('applicant'), async (req, res, next)
     if (!['draft', 'returned'].includes(application.status)) throw badRequest('Application is frozen and cannot be edited', 'APPLICATION_FROZEN');
     if (application.batch_status !== 'open' || (application.deadline_at && new Date(application.deadline_at).getTime() < Date.now())) throw badRequest('Batch is not open', 'BATCH_NOT_OPEN');
     const data = validateApplicationData(req.body.applicationData || {}, normalizeApplicationSchema(application.application_schema));
+    await assertApplicationParticipationEligible(connection, application.applicant_person_id, application.application_year, data);
     await connection.execute('UPDATE project_applications SET application_data = ?, updated_at = NOW() WHERE id = ?', [JSON.stringify(data), application.id]);
     await appendApplicationAudit(connection, { eventType: 'application_edited', user: req.user, batchId: application.application_batch_id, applicationId: application.id, payload: { fields: Object.keys(data) }, ip: req.ip });
     await connection.commit();
@@ -434,6 +454,9 @@ router.post('/:id/materials/:requirementId', requireAuth, requireRole('applicant
     const application = await loadApplicationForAccess(connection, req.params.id, req.user, true);
     if (!['draft', 'returned'].includes(application.status)) throw badRequest('Application is frozen and cannot accept files', 'APPLICATION_FROZEN');
     if (application.batch_status !== 'open' || (application.deadline_at && new Date(application.deadline_at).getTime() < Date.now())) throw badRequest('Batch is not open', 'BATCH_NOT_OPEN');
+    await assertApplicationParticipationEligible(
+      connection, application.applicant_person_id, application.application_year, parseJson(application.application_data, {})
+    );
     const [[requirement]] = await connection.execute(
       `SELECT * FROM application_material_requirements WHERE id = ? AND application_batch_id = ? AND deleted_at IS NULL LIMIT 1`,
       [req.params.requirementId, application.application_batch_id]
@@ -965,6 +988,7 @@ router.post('/batches/:id/results/manual', requireAuth, requireRole('admin'), re
 });
 
 async function ensureProjectForResult(connection, { batch, row, personId, applicationId, importId, userId }) {
+  await assertPeopleEligibleForYear(connection, [personId], Number(batch.application_year), '学校名单转正式项目');
   const [[owned]] = await connection.execute(
     `SELECT project_id FROM project_participations WHERE person_id = ? AND role = 'owner' AND deleted_at IS NULL LIMIT 1 FOR UPDATE`, [personId]
   );

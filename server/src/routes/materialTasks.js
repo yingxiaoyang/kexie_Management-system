@@ -12,6 +12,7 @@ import { enumValue, nullableText, paginationFrom, requiredText } from '../utils/
 import { success } from '../utils/response.js';
 import { inspectOriginalFileName, setFileResponseHeaders } from '../utils/fileNames.js';
 import { normalizeChangeScope } from '../utils/projectChange.js';
+import { scanOverdueRequiredMaterials } from '../services/participationEligibilityService.js';
 
 const router = Router();
 const taskStatuses = ['draft', 'published', 'closed'];
@@ -345,6 +346,9 @@ router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('mate
     for (const projectId of data.projectIds) {
       await connection.execute('INSERT INTO material_task_projects (material_task_id, project_id) VALUES (?, ?)', [result.insertId, projectId]);
     }
+    if (['published', 'closed'].includes(data.status)) {
+      await scanOverdueRequiredMaterials(connection, { materialTaskId: Number(result.insertId), actorUserId: req.user.id, triggerSource: 'business_event' });
+    }
     await connection.commit();
     success(res, { id: result.insertId, fileTasks: savedFileTasks }, 'Material task created');
   } catch (error) {
@@ -439,6 +443,9 @@ router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('ma
     for (const projectId of data.projectIds) {
       await connection.execute('INSERT INTO material_task_projects (material_task_id, project_id) VALUES (?, ?)', [req.params.id, projectId]);
     }
+    if (['published', 'closed'].includes(data.status)) {
+      await scanOverdueRequiredMaterials(connection, { materialTaskId: Number(req.params.id), actorUserId: req.user.id, triggerSource: 'business_event' });
+    }
     await connection.commit();
     success(res, { id: Number(req.params.id), fileTasks: savedFileTasks }, 'Material task updated');
   } catch (error) {
@@ -450,14 +457,24 @@ router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('ma
 });
 
 router.patch('/:id/status', requireAuth, requireRole('admin'), requireAdminPermission('material_task'), async (req, res, next) => {
+  let connection;
   try {
     const status = enumValue(req.body.status, taskStatuses, 'status');
-    const [result] = await pool.execute('UPDATE material_tasks SET status = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL', [status, req.params.id]);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [result] = await connection.execute('UPDATE material_tasks SET status = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL', [status, req.params.id]);
     if (!result.affectedRows) throw notFound('Material task not found');
+    if (['published', 'closed'].includes(status)) {
+      await scanOverdueRequiredMaterials(connection, {
+        materialTaskId: Number(req.params.id), actorUserId: req.user.id, triggerSource: 'business_event'
+      });
+    }
+    await connection.commit();
     success(res, null, 'Task status updated');
   } catch (error) {
+    await connection?.rollback().catch(() => undefined);
     next(error);
-  }
+  } finally { connection?.release(); }
 });
 
 router.get('/:taskId/templates', requireAuth, requireRole('admin', 'project_owner'), requirePermissionWhenAdmin('material_task'), async (req, res, next) => {

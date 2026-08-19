@@ -23,6 +23,8 @@
           <el-button :loading="loading" @click="loadProjects">查询</el-button>
         </div>
         <div class="toolbar-actions">
+          <el-button v-if="canArchive" :disabled="!selectedProjects.length" @click="openQuickExport('selected')">导出所选项目</el-button>
+          <el-button v-if="canArchive" @click="openQuickExport('filtered')">导出当前筛选全部</el-button>
           <el-button @click="importVisible = true"><el-icon><Upload /></el-icon>标准工作簿导入</el-button>
           <el-button @click="downloadTemplate"><el-icon><Download /></el-icon>下载模板</el-button>
         </div>
@@ -83,6 +85,12 @@
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveProject">保存</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="exportVisible" title="项目整理包快捷导出" width="620px">
+      <el-alert title="快捷导出沿用归档模板和导出队列；当前筛选全部会在预检时固化项目 ID 快照。" type="info" :closable="false" />
+      <el-form label-width="100px" class="section"><el-form-item label="导出范围">{{ exportMode==='selected'?`已选 ${selectedProjects.length} 个项目`:'当前筛选全部项目' }}</el-form-item><el-form-item label="归档模板"><el-select v-model="quickTemplateId" filterable style="width:100%"><el-option v-for="item in archiveTemplates" :key="item.id" :label="item.templateName" :value="item.id" /></el-select></el-form-item></el-form>
+      <template #footer><el-button @click="exportVisible=false">取消</el-button><el-button type="primary" :loading="exporting" @click="quickExport">预检并导出</el-button></template>
+    </el-dialog>
+
     <el-dialog v-model="importVisible" title="标准工作簿导入" width="700px" @closed="resetImport">
       <el-alert title="先校验、不立即写库；校验全部通过后再确认导入。" type="info" show-icon :closable="false" />
       <el-upload class="section" drag action="#" accept=".xlsx" :auto-upload="false" :limit="1" :on-change="selectImportFile" :on-remove="removeImportFile">
@@ -105,21 +113,25 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiRequest, downloadFile } from '../../services/http'
 import { useRouter } from 'vue-router'
+import { authStore } from '../../stores/auth'
 
 const statusOptions = [
   { label: '草稿', value: 'draft' }, { label: '进行中', value: 'active' }, { label: '检查中', value: 'checking' },
-  { label: '已结项', value: 'completed' }, { label: '已归档', value: 'archived' }, { label: '已停止', value: 'stopped' },
+  { label: '已结项', value: 'completed' }, { label: '已归档', value: 'archived' },
+  { label: '已终止', value: 'terminated' }, { label: '已停止（旧）', value: 'stopped' },
 ]
 const projects = ref([])
 const selectedProjects = ref([])
+const canArchive = computed(() => authStore.hasPermission('archive_management'))
 const router = useRouter()
 const studentOptions = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const exportVisible = ref(false), exporting = ref(false), exportMode = ref('selected'), quickTemplateId = ref(null), archiveTemplates = ref([])
 const dialogVisible = ref(false)
 const formRef = ref()
 const filters = reactive({ keyword: '', year: '', status: '', group: '', category: '' })
@@ -139,6 +151,15 @@ async function loadProjects() { loading.value = true; try { const response = awa
 async function loadStudents() { try { const response = await apiRequest('/people?personType=student&pageSize=100'); studentOptions.value = response.data } catch (e) { ElMessage.error(e.message) } }
 function openForm(row) { Object.assign(form, row ? { ...row, id: row.id, ownerPersonId: null, approvalDate: row.approvalDate?.slice?.(0, 10) || row.approvalDate || '' } : { id: null, projectYear: new Date().getFullYear(), projectGroup: '', projectCode: '', title: '', category: '', approvalDate: '', approvalType: 'first', approvalBatch: '', status: 'active', ownerPersonId: null, remark: '' }); if ((!row || !row.owners) && !studentOptions.value.length) loadStudents(); dialogVisible.value = true }
 function openWorkspace(row) { router.push(`/admin/projects/${row.id}`) }
+async function openQuickExport(mode) { exportMode.value=mode; exportVisible.value=true; try { archiveTemplates.value=(await apiRequest('/archive-templates?page=1&pageSize=100&status=enabled')).data; quickTemplateId.value=archiveTemplates.value[0]?.id||null } catch(e){ElMessage.error(e.message)} }
+function templateTaskIds() { const template=archiveTemplates.value.find(item=>Number(item.id)===Number(quickTemplateId.value)); const ids=new Set(); const walk=nodes=>(nodes||[]).forEach(node=>{if(node.type==='task')ids.add(Number(node.materialTaskId));else walk(node.children)}); walk(template?.templateConfig?.nodes); return [...ids] }
+async function quickExport() { if(!quickTemplateId.value)return ElMessage.warning('请选择归档模板'); exporting.value=true; try { const scope=exportMode.value==='selected'
+    ? { selectionMode:'selected', projectIds:selectedProjects.value.map(item=>Number(item.id)), materialTaskIds:templateTaskIds() }
+    : { selectionMode:'filtered', years:filters.year?[Number(filters.year)]:[], groups:filters.group?[filters.group]:[], materialTaskIds:templateTaskIds(), projectFilter:{keyword:filters.keyword,status:filters.status,category:filters.category} }
+  const preflight=(await apiRequest('/archive-exports/preflight',{method:'POST',body:{archiveTemplateId:quickTemplateId.value,scope}})).data; const c=preflight.counts
+  await ElMessageBox.confirm(`项目 ${c.projectCount} 个；正式材料 ${c.formalMaterialCount} 项；必填异常 ${c.requiredIssueCount} 项；选填异常 ${c.optionalAnomalyCount} 项；不适用 ${c.notApplicableCount} 项。`,'确认快捷导出')
+  await apiRequest('/archive-exports',{method:'POST',body:{archiveTemplateId:quickTemplateId.value,scope:preflight.scopeSnapshot,remark:exportMode.value==='selected'?'项目列表所选项目快捷导出':'项目列表筛选快照快捷导出'}}); ElMessage.success('已加入整理包导出队列'); exportVisible.value=false
+  } catch(e){if(e!=='cancel')ElMessage.error(e.message)} finally{exporting.value=false} }
 async function saveProject() { if (!(await formRef.value?.validate().catch(() => false))) return; if ((!form.id || !form.owners) && form.status !== 'draft' && !form.ownerPersonId) { ElMessage.warning('正式状态项目必须选择一名负责人'); return } saving.value = true; try { await apiRequest(form.id ? `/projects/${form.id}` : '/projects', { method: form.id ? 'PUT' : 'POST', body: form }); ElMessage.success('项目已保存'); dialogVisible.value = false; await loadProjects() } catch (e) { ElMessage.error(e.message) } finally { saving.value = false } }
 function selectImportFile(file) { importFile.value = file.raw; importResult.value = null }
 function removeImportFile() { importFile.value = null; importResult.value = null }

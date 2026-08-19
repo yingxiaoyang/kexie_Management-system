@@ -17,9 +17,10 @@ import {
 import { resolveDownloadFile } from '../utils/safeFiles.js';
 import { env } from '../config/env.js';
 import { inspectOriginalFileName, setFileResponseHeaders } from '../utils/fileNames.js';
+import { assertPeopleEligibleForYear, restrictTerminatedProject, scanOverdueRequiredMaterials } from '../services/participationEligibilityService.js';
 
 const router = Router();
-const statuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped'];
+const statuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped', 'terminated'];
 const approvalTypes = ['first', 'supplement'];
 
 function projectPayload(body) {
@@ -129,7 +130,10 @@ router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('proj
     }
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    if (ownerPersonId) await assertEligibleProjectOwner(connection, ownerPersonId);
+    if (ownerPersonId) {
+      await assertEligibleProjectOwner(connection, ownerPersonId);
+      await assertPeopleEligibleForYear(connection, [ownerPersonId], data.projectYear, '项目负责人');
+    }
     const [result] = await connection.execute(
       `INSERT INTO projects
        (project_year, project_group, project_code, title, category, approval_date, approval_type, approval_batch, status, remark)
@@ -144,6 +148,7 @@ router.post('/', requireAuth, requireRole('admin'), requireAdminPermission('proj
       );
     }
     await assertFormalProjectOwnership(connection, [Number(result.insertId)]);
+    await scanOverdueRequiredMaterials(connection, { projectId: Number(result.insertId), actorUserId: req.user.id, triggerSource: 'business_event' });
     await writeProjectAudit(connection, {
       projectId: Number(result.insertId), eventType: 'project_created', actorUserId: req.user.id,
       changes: projectFieldChanges({}, data), payload: { summary: '管理员创建项目记录' }
@@ -198,6 +203,10 @@ router.put('/:id', requireAuth, requireRole('admin'), requireAdminPermission('pr
     );
     if (!result.affectedRows) throw notFound('Project not found');
     await assertFormalProjectOwnership(connection, [Number(project.id)]);
+    if (!['stopped', 'terminated'].includes(project.status) && ['stopped', 'terminated'].includes(data.status)) {
+      await restrictTerminatedProject(connection, Number(project.id), { actorUserId: req.user.id, triggerSource: 'business_event' });
+    }
+    await scanOverdueRequiredMaterials(connection, { projectId: Number(project.id), actorUserId: req.user.id, triggerSource: 'business_event' });
     const changes = projectFieldChanges(project, data);
     if (changes.length) {
       await writeProjectAudit(connection, {
@@ -266,7 +275,7 @@ router.put('/:id/participations', requireAuth, requireRole('admin'), requireAdmi
     if (memberIds.some((id) => advisorIds.includes(id))) throw badRequest('同一人员不能同时作为成员和指导教师', 'VALIDATION_ERROR');
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const [[project]] = await connection.execute('SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
+    const [[project]] = await connection.execute('SELECT id, project_year AS projectYear FROM projects WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [req.params.id]);
     if (!project) throw notFound('Project not found');
     const [beforeRows] = await connection.execute(
       `SELECT pp.id, pp.person_id AS personId, pp.role, pp.joined_at AS joinedAt, pp.remark, pe.name,
@@ -287,6 +296,7 @@ router.put('/:id/participations', requireAuth, requireRole('admin'), requireAdmi
       if (advisorIds.some((id) => typeMap.get(id) !== 'teacher')) throw badRequest('指导教师必须是教师', 'PROJECT_ADVISOR_MUST_BE_TEACHER');
     }
     if (memberIds.includes(Number(owner.personId))) throw badRequest('负责人不能重复添加为项目成员', 'VALIDATION_ERROR');
+    await assertPeopleEligibleForYear(connection, memberIds, project.projectYear, '项目成员');
     if (memberIds.length) {
       const [[memberRule]] = await connection.execute(
         "SELECT limit_count AS limitCount FROM participation_rules WHERE rule_key = 'max_member_projects_per_person' AND enabled = 1 LIMIT 1 FOR UPDATE"
@@ -329,6 +339,7 @@ router.put('/:id/participations', requireAuth, requireRole('admin'), requireAdmi
       });
     }
     await assertFormalProjectOwnership(connection, [Number(project.id)]);
+    await scanOverdueRequiredMaterials(connection, { projectId: Number(project.id), actorUserId: req.user.id, triggerSource: 'business_event' });
     await connection.commit();
     success(res, { participations: afterSnapshot }, 'Project participations updated');
   } catch (error) {

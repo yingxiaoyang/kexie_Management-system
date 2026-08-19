@@ -12,7 +12,7 @@
       <el-icon class="archive-node-icon"><FolderOpened v-if="node.type === 'folder'" /><Document v-else /></el-icon>
       <div class="archive-node-copy">
         <strong>{{ node.type === 'folder' ? node.nameRule : node.fileTaskName }}</strong>
-        <span v-if="node.type === 'task'">{{ node.materialTaskName }}</span>
+        <span v-if="node.type === 'task'">{{ node.materialTaskName }} · {{ requiredLabel(node) }}</span>
       </div>
       <div class="archive-node-actions" @click.stop>
         <el-tooltip v-if="node.type === 'folder'" content="新建子文件夹" placement="top">
@@ -57,6 +57,7 @@ const props = defineProps({
   selectedId: { type: String, default: '' },
 })
 const emit = defineEmits(['select', 'add-folder', 'move', 'remove', 'drop-node'])
+const requiredLabel = (node) => ({ required: '模板必填', optional: '模板选填', inherit: '继承任务' }[node.requiredMode || 'inherit'])
 
 function startDrag(event) {
   event.dataTransfer.effectAllowed = 'move'

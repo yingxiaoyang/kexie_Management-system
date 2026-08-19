@@ -392,7 +392,8 @@ function projectStatusText(value) {
     checking: '检查中',
     completed: '已完成',
     archived: '已归档',
-    stopped: '已终止'
+    stopped: '已停止（旧）',
+    terminated: '已终止'
   }[value] || value || '';
 }
 

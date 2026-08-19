@@ -67,6 +67,10 @@
             <div class="property-editor-title"><el-icon><EditPen /></el-icon>{{ selectedNode.type === 'folder' ? '文件夹命名' : '归档文件命名' }}</div>
             <el-input v-if="selectedNode.type === 'folder'" v-model.trim="selectedNode.nameRule" placeholder="固定文字和占位字段可组合" />
             <el-input v-else v-model.trim="selectedNode.fileNameRule" placeholder="系统会自动保留原扩展名" />
+            <el-form-item v-if="selectedNode.type === 'task'" label="必填性" class="section">
+              <el-radio-group v-model="selectedNode.requiredMode"><el-radio-button value="inherit">继承任务</el-radio-button><el-radio-button value="required">模板必填</el-radio-button><el-radio-button value="optional">模板选填</el-radio-button></el-radio-group>
+              <p v-if="selectedNode.requiredReviewNeeded" class="danger-text">旧模板未保存必填性，当前按任务继承；请核对后保存。</p>
+            </el-form-item>
             <div class="field-insert-row"><span>可用命名字段：</span><ArchivePlaceholderPicker :groups="placeholderGroups" @select="insertSelectedToken" /></div>
           </div>
         </section>
@@ -311,7 +315,7 @@ function containsNode(root, id) {
   return contains
 }
 function makeTaskNode(task, fileTask) {
-  return { id: uid('task'), type: 'task', materialTaskId: Number(task.id), fileTaskId: Number(fileTask.id), materialTaskName: task.taskName, fileTaskName: fileTask.fileTaskName, fileNameRule: '{材料类别}_{原文件名}' }
+  return { id: uid('task'), type: 'task', materialTaskId: Number(task.id), fileTaskId: Number(fileTask.id), materialTaskName: task.taskName, fileTaskName: fileTask.fileTaskName, fileNameRule: '{材料类别}_{原文件名}', requiredMode: 'inherit', requiredReviewNeeded: false }
 }
 function insertNode(node, targetId, mode) {
   if (!targetId) form.nodes.push(node)

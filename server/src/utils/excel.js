@@ -130,8 +130,12 @@ export async function xlsxBuffer(headers, rows, sheetName = '数据') {
   workbook.created = new Date();
   const worksheet = workbook.addWorksheet(String(sheetName || '数据').slice(0, 31));
   worksheet.addRow(headers);
+  const safeText = (value) => {
+    const text = value == null ? '' : String(value);
+    return /^[=+\-@]/.test(text) ? `'${text}` : text;
+  };
   for (const row of rows) {
-    worksheet.addRow(row.map((value) => (value == null ? '' : String(value))));
+    worksheet.addRow(row.map(safeText));
   }
   worksheet.eachRow((row, rowNumber) => {
     row.eachCell({ includeEmpty: true }, (cell) => {

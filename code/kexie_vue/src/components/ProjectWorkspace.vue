@@ -26,6 +26,10 @@
         </div>
       </section>
 
+      <el-alert v-if="data.activeRestrictions.length" class="section" type="warning" :closable="false" show-icon title="当前跨届参与限制">
+        <template #default><div v-for="item in data.activeRestrictions" :key="item.id">{{ item.name }}：限制 {{ item.restrictionYear }} 年度；{{ item.triggerReason==='project_terminated'?'项目终止':`必填材料逾期未通过${item.sourceTaskName?`（${item.sourceTaskName}）`:''}` }}</div></template>
+      </el-alert>
+
       <section class="workspace-section lifecycle-section">
         <div class="section-heading"><div><h3>项目生命周期</h3><p>从立项申请到正式项目与材料履约的关键进度</p></div></div>
         <div class="lifecycle-track">
@@ -113,18 +117,18 @@ import { authStore } from '../stores/auth'
 const route = useRoute(), router = useRouter()
 const loading = ref(false), saving = ref(false), activeTab = ref('details'), eventFilter = ref('all')
 const projectDialog = ref(false), peopleDialog = ref(false), projectFormRef = ref()
-const data = reactive({ project: null, source: null, participations: [], materials: [], timeline: [], capabilities: {}, summary: {} })
+const data = reactive({ project: null, source: null, participations: [], materials: [], timeline: [], activeRestrictions: [], capabilities: {}, summary: {} })
 const projectForm = reactive({}), peopleForm = reactive({ memberPersonIds: [], advisorPersonIds: [] })
 const studentOptions = ref([]), teacherOptions = ref([])
 const isAdmin = computed(() => authStore.state.user?.role === 'admin')
 const canEdit = computed(() => Boolean(data.capabilities.canEditProject && isAdmin.value))
 const isReadOnly = computed(() => !canEdit.value)
 const backPath = computed(() => isAdmin.value ? '/admin/projects' : '/owner/projects')
-const statusOptions = [{label:'草稿',value:'draft'},{label:'进行中',value:'active'},{label:'检查中',value:'checking'},{label:'已结项',value:'completed'},{label:'已归档',value:'archived'},{label:'已停止',value:'stopped'}]
+const statusOptions = [{label:'草稿',value:'draft'},{label:'进行中',value:'active'},{label:'检查中',value:'checking'},{label:'已结项',value:'completed'},{label:'已归档',value:'archived'},{label:'已终止',value:'terminated'},{label:'已停止（旧）',value:'stopped'}]
 const rules = { projectYear:[{required:true,message:'请选择项目年度'}], projectCode:[{required:true,message:'请输入项目编号'}], title:[{required:true,message:'请输入作品名称'}] }
 const labels = { projectYear:'年度',projectGroup:'组别',projectCode:'项目编号',title:'作品名称',category:'项目类别',approvalDate:'立项日期',approvalType:'立项类型',approvalBatch:'立项批次',status:'项目状态',remark:'备注' }
 const statusLabel = value => statusOptions.find(item=>item.value===value)?.label || value
-const statusType = value => ({active:'success',checking:'warning',completed:'success',archived:'info',stopped:'danger'}[value] || 'info')
+const statusType = value => ({active:'success',checking:'warning',completed:'success',archived:'info',stopped:'danger',terminated:'danger'}[value] || 'info')
 const roleLabel = value => ({owner:'项目负责人',member:'项目成员',advisor:'指导教师'}[value] || value)
 const reviewLabel = value => ({pending:'待审核',approved:'已通过',returned:'已退回'}[value] || value)
 const reviewType = value => ({pending:'warning',approved:'success',returned:'danger'}[value] || 'info')

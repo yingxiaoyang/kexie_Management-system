@@ -53,11 +53,21 @@ function textList(value, fieldName) {
 
 export function normalizeScope(input) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const projectFilter = raw.projectFilter && typeof raw.projectFilter === 'object' && !Array.isArray(raw.projectFilter)
+    ? {
+        keyword: String(raw.projectFilter.keyword || '').trim().slice(0, 160),
+        status: String(raw.projectFilter.status || '').trim().slice(0, 30),
+        category: String(raw.projectFilter.category || '').trim().slice(0, 120)
+      }
+    : { keyword: '', status: '', category: '' };
   return {
     years: numberList(raw.years, 'scope.years', { min: 2000, max: 2100 }),
     groups: textList(raw.groups, 'scope.groups'),
     materialTaskIds: numberList(raw.materialTaskIds, 'scope.materialTaskIds'),
-    projectIds: numberList(raw.projectIds, 'scope.projectIds')
+    projectIds: numberList(raw.projectIds, 'scope.projectIds'),
+    selectionMode: ['selected', 'filtered', 'scope'].includes(raw.selectionMode) ? raw.selectionMode : 'scope',
+    snapshotLocked: raw.snapshotLocked === true,
+    projectFilter
   };
 }
 
@@ -101,21 +111,24 @@ export async function expectedMaterials(scope, templateConfig) {
             COALESCE(owners.ownerPhones, '未登记电话') AS ownerPhone,
             COALESCE(members.memberNames, '未登记成员') AS memberNames,
             COALESCE(advisors.advisorNames, '未登记指导教师') AS advisorNames,
-            approved.id AS approvedSubmissionId, approved.submitted_at AS approvedSubmittedAt,
-            approved.reviewed_at AS approvedAt, reviewer.display_name AS reviewerName,
+            CASE WHEN latest.review_status = 'approved' THEN latest.id END AS approvedSubmissionId,
+            CASE WHEN latest.review_status = 'approved' THEN latest.submitted_at END AS approvedSubmittedAt,
+            CASE WHEN latest.review_status = 'approved' THEN latest.reviewed_at END AS approvedAt,
+            reviewer.display_name AS reviewerName, mc.is_required AS taskRequired,
+            CASE WHEN (
+              mt.project_scope_type = 'all'
+              OR (mt.project_scope_type = 'year' AND mt.project_year = p.project_year)
+              OR (mt.project_scope_type = 'group' AND mt.project_group = p.project_group)
+              OR (mt.project_scope_type = 'custom' AND EXISTS (
+                SELECT 1 FROM material_task_projects applicable_mtp
+                WHERE applicable_mtp.material_task_id = mt.id AND applicable_mtp.project_id = p.id
+              ))
+            ) THEN 1 ELSE 0 END AS isApplicable,
             latest.id AS latestSubmissionId, latest.review_status AS latestReviewStatus,
             latest.return_reason AS latestReturnReason
      FROM material_tasks mt
      JOIN material_categories mc ON mc.material_task_id = mt.id
-     JOIN projects p ON (
-       mt.project_scope_type = 'all'
-       OR (mt.project_scope_type = 'year' AND mt.project_year = p.project_year)
-       OR (mt.project_scope_type = 'group' AND mt.project_group = p.project_group)
-       OR (mt.project_scope_type = 'custom' AND EXISTS (
-         SELECT 1 FROM material_task_projects mtp
-         WHERE mtp.material_task_id = mt.id AND mtp.project_id = p.id
-       ))
-     )
+     JOIN projects p ON 1 = 1
      LEFT JOIN (
        SELECT pp.project_id,
               GROUP_CONCAT(pe.name ORDER BY pp.is_primary_owner DESC, pe.name SEPARATOR '、') AS ownerNames,
@@ -141,17 +154,6 @@ export async function expectedMaterials(scope, templateConfig) {
        WHERE pp.role = 'advisor' AND pp.deleted_at IS NULL
        GROUP BY pp.project_id
      ) advisors ON advisors.project_id = p.id
-     LEFT JOIN material_submissions approved ON approved.id = (
-       SELECT candidate.id FROM material_submissions candidate
-       WHERE candidate.material_task_id = mt.id
-         AND candidate.project_id = p.id
-         AND candidate.material_category_id = mc.id
-         AND candidate.review_status = 'approved'
-         AND candidate.deleted_at IS NULL
-       ORDER BY COALESCE(candidate.reviewed_at, candidate.submitted_at, candidate.created_at) DESC, candidate.id DESC
-       LIMIT 1
-     )
-     LEFT JOIN users reviewer ON reviewer.id = approved.reviewed_by AND reviewer.deleted_at IS NULL
      LEFT JOIN material_submissions latest ON latest.id = (
        SELECT candidate.id FROM material_submissions candidate
        WHERE candidate.material_task_id = mt.id
@@ -160,11 +162,24 @@ export async function expectedMaterials(scope, templateConfig) {
          AND candidate.deleted_at IS NULL
        ORDER BY candidate.id DESC LIMIT 1
      )
+     LEFT JOIN users reviewer ON reviewer.id = latest.reviewed_by AND reviewer.deleted_at IS NULL
      WHERE ${conditions.join(' AND ')}
      ORDER BY p.project_year, p.project_group, p.project_code, mt.id, mc.sort_order, mc.id`,
     params
   );
-  return rows;
+  const placements = new Map((templateConfig.version === 2 ? archivePlacements(templateConfig) : [])
+    .map((item) => [Number(item.fileTaskId), item]));
+  return rows.map((row) => {
+    const placement = placements.get(Number(row.categoryId));
+    const requiredMode = placement?.requiredMode || 'inherit';
+    return {
+      ...row,
+      isApplicable: Boolean(row.isApplicable),
+      effectiveRequired: requiredMode === 'required' || (requiredMode === 'inherit' && Boolean(row.taskRequired)),
+      requiredMode,
+      requiredReviewNeeded: Boolean(placement?.requiredReviewNeeded)
+    };
+  });
 }
 
 export async function submissionFiles(submissionIds) {
@@ -222,6 +237,93 @@ async function estimateArchiveExport(scope, templateConfig) {
   return { rows, projectCount, totalFileBytes };
 }
 
+async function snapshotProjects(scope) {
+  if (scope.snapshotLocked && scope.projectIds.length) return scope;
+  if (scope.selectionMode === 'selected' && scope.projectIds.length) return { ...scope, snapshotLocked: true };
+  if (scope.selectionMode === 'scope' && scope.projectIds.length) return { ...scope, snapshotLocked: true };
+  const conditions = ['p.deleted_at IS NULL'];
+  const params = [];
+  addInCondition(conditions, params, 'p.project_year', scope.years);
+  addInCondition(conditions, params, 'p.project_group', scope.groups);
+  if (scope.projectFilter.status) { conditions.push('p.status = ?'); params.push(scope.projectFilter.status); }
+  if (scope.projectFilter.category) { conditions.push('p.category = ?'); params.push(scope.projectFilter.category); }
+  if (scope.projectFilter.keyword) {
+    const keyword = `%${scope.projectFilter.keyword}%`;
+    conditions.push(`(p.project_code LIKE ? OR p.title LIKE ? OR EXISTS (
+      SELECT 1 FROM project_participations pp JOIN people pe ON pe.id = pp.person_id
+      WHERE pp.project_id = p.id AND pp.role = 'owner' AND pp.deleted_at IS NULL AND pe.name LIKE ?
+    ))`);
+    params.push(keyword, keyword, keyword);
+  }
+  const [projects] = await pool.execute(
+    `SELECT p.id FROM projects p WHERE ${conditions.join(' AND ')} ORDER BY p.id`, params
+  );
+  return { ...scope, projectIds: projects.map((row) => Number(row.id)), snapshotLocked: true };
+}
+
+export function archiveMaterialState(row) {
+  if (!row.isApplicable) return 'not_applicable';
+  if (row.latestReviewStatus === 'approved') return 'formal';
+  if (row.effectiveRequired) {
+    if (!row.latestSubmissionId) return 'required_missing';
+    return row.latestReviewStatus === 'pending' ? 'required_pending' : 'required_returned';
+  }
+  if (!row.latestSubmissionId) return 'optional_skipped';
+  return row.latestReviewStatus === 'pending' ? 'optional_pending' : 'optional_returned';
+}
+
+function preflightCounts(rows) {
+  const projectIds = new Set(rows.map((row) => Number(row.projectId)));
+  const applicableTasks = new Set();
+  const counts = {
+    projectCount: projectIds.size, applicableTaskCount: 0, formalMaterialCount: 0,
+    requiredMissingCount: 0, requiredPendingCount: 0, requiredReturnedCount: 0,
+    optionalNotSubmittedCount: 0, optionalAnomalyCount: 0, notApplicableCount: 0
+  };
+  for (const row of rows) {
+    const state = archiveMaterialState(row);
+    if (state === 'not_applicable') { counts.notApplicableCount += 1; continue; }
+    applicableTasks.add(`${row.projectId}:${row.taskId}`);
+    if (state === 'formal') counts.formalMaterialCount += 1;
+    else if (state === 'required_missing') counts.requiredMissingCount += 1;
+    else if (state === 'required_pending') counts.requiredPendingCount += 1;
+    else if (state === 'required_returned') counts.requiredReturnedCount += 1;
+    else if (state === 'optional_skipped') counts.optionalNotSubmittedCount += 1;
+    else counts.optionalAnomalyCount += 1;
+  }
+  counts.applicableTaskCount = applicableTasks.size;
+  counts.requiredIssueCount = counts.requiredMissingCount + counts.requiredPendingCount + counts.requiredReturnedCount;
+  return counts;
+}
+
+async function loadEnabledTemplate(archiveTemplateId) {
+  const [[template]] = await pool.execute(
+    `SELECT id, template_config AS templateConfig
+     FROM archive_templates WHERE id = ? AND status = 'enabled' AND deleted_at IS NULL LIMIT 1`,
+    [archiveTemplateId]
+  );
+  if (!template) throw notFound('Enabled archive template not found');
+  return normalizeArchiveTemplateConfig(template.templateConfig);
+}
+
+export async function preflightArchiveExport({ archiveTemplateId, rawScope }) {
+  let scope = normalizeScope(rawScope);
+  const templateConfig = await loadEnabledTemplate(archiveTemplateId);
+  if (templateConfig.version === 2) {
+    const placedTaskIds = new Set(archivePlacements(templateConfig).map((item) => item.materialTaskId));
+    const invalidTaskIds = scope.materialTaskIds.filter((id) => !placedTaskIds.has(id));
+    if (invalidTaskIds.length) throw badRequest('scope.materialTaskIds contains tasks not placed in this archive template', 'VALIDATION_ERROR');
+  }
+  scope = await snapshotProjects(scope);
+  if (!scope.projectIds.length) throw badRequest('导出范围没有匹配项目', 'ARCHIVE_EXPORT_EMPTY_SCOPE');
+  const estimate = await estimateArchiveExport(scope, templateConfig);
+  if (estimate.projectCount > env.archive.maxProjects) throw badRequest(`Export project count exceeds the configured limit of ${env.archive.maxProjects}`, 'ARCHIVE_EXPORT_PROJECT_LIMIT');
+  if (estimate.totalFileBytes > env.archive.maxTotalFileBytes) throw badRequest('Export source file size exceeds the configured limit', 'ARCHIVE_EXPORT_SIZE_LIMIT');
+  const counts = preflightCounts(estimate.rows);
+  counts.projectCount = scope.projectIds.length;
+  return { scopeSnapshot: scope, counts, totalFileBytes: estimate.totalFileBytes };
+}
+
 async function withQueueLock(callback) {
   const connection = await pool.getConnection();
   let locked = false;
@@ -246,24 +348,11 @@ async function assertQueueHasCapacity(connection) {
 }
 
 export async function validateAndEnqueueArchiveExport({ userId, archiveTemplateId, rawScope, remark }) {
-  const scope = normalizeScope(rawScope);
+  const preflight = await preflightArchiveExport({ archiveTemplateId, rawScope });
+  const scope = preflight.scopeSnapshot;
   const cleanRemark = String(remark || '').trim();
   if (cleanRemark.length > 1000) throw badRequest('remark is too long', 'VALIDATION_ERROR');
-  const [[template]] = await pool.execute(
-    `SELECT id, template_config AS templateConfig
-     FROM archive_templates WHERE id = ? AND status = 'enabled' AND deleted_at IS NULL LIMIT 1`,
-    [archiveTemplateId]
-  );
-  if (!template) throw notFound('Enabled archive template not found');
-  const templateConfig = normalizeArchiveTemplateConfig(template.templateConfig);
-  if (templateConfig.version === 2) {
-    const placedTaskIds = new Set(archivePlacements(templateConfig).map((item) => item.materialTaskId));
-    const invalidTaskIds = scope.materialTaskIds.filter((id) => !placedTaskIds.has(id));
-    if (invalidTaskIds.length) {
-      throw badRequest('scope.materialTaskIds contains tasks not placed in this archive template', 'VALIDATION_ERROR');
-    }
-  }
-
+  const templateConfig = await loadEnabledTemplate(archiveTemplateId);
   const estimate = await estimateArchiveExport(scope, templateConfig);
   if (estimate.projectCount > env.archive.maxProjects) {
     throw badRequest(`Export project count exceeds the configured limit of ${env.archive.maxProjects}`, 'ARCHIVE_EXPORT_PROJECT_LIMIT');
@@ -281,7 +370,7 @@ export async function validateAndEnqueueArchiveExport({ userId, archiveTemplateI
        VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
       [userId, archiveTemplateId, JSON.stringify(scope), JSON.stringify(templateConfig), env.archive.maxAttempts, cleanRemark || null]
     );
-    return { id: result.insertId, exportStatus: 'queued' };
+    return { id: result.insertId, exportStatus: 'queued', preflight: preflight.counts };
   });
 }
 
@@ -300,6 +389,8 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
   const usedEntries = new Set();
   const exportedRows = [];
   const missingRows = [];
+  const optionalStatusRows = [];
+  const matrixRows = [];
   let approvedMaterialCount = 0;
   let exportedFileCount = 0;
 
@@ -347,11 +438,29 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
   }
 
   for (const row of archiveRows) {
+    const requiredText = row.effectiveRequired ? '必填' : '选填';
+    const applicabilityText = row.isApplicable ? '适用' : '不适用';
+    const stateText = !row.isApplicable ? '不适用'
+      : !row.latestSubmissionId ? '未提交'
+        : row.latestReviewStatus === 'approved' ? '审核通过'
+          : row.latestReviewStatus === 'pending' ? '待审核' : '已退回';
+    const stateReason = !row.isApplicable ? '任务未实际发布给该项目'
+      : row.latestReviewStatus === 'returned' ? (row.latestReturnReason || '审核退回') : stateText;
+    matrixRows.push([row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle,
+      row.taskName, row.categoryName, applicabilityText, requiredText, row.requiredMode, stateText, stateReason]);
+    if (!row.isApplicable) continue;
     if (!row.approvedSubmissionId) {
-      missingRows.push([
-        row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
-        row.taskName, row.categoryName, missingReason(row)
-      ]);
+      if (row.effectiveRequired) {
+        missingRows.push([
+          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
+          row.taskName, row.categoryName, missingReason(row)
+        ]);
+      } else if (row.latestSubmissionId) {
+        optionalStatusRows.push([
+          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle,
+          row.taskName, row.categoryName, stateText, stateReason
+        ]);
+      }
       continue;
     }
     const files = fileMap.get(Number(row.approvedSubmissionId)) || [];
@@ -368,10 +477,10 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
         const reason = error?.code === 'SUBMISSION_FILE_PATH_INVALID'
           ? `审核通过版本的文件路径不在系统上传目录：${file.originalName}`
           : `审核通过版本的文件不存在：${file.originalName}`;
-        missingRows.push([
-          row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
-          row.taskName, row.categoryName, reason
-        ]);
+        const target = row.effectiveRequired ? missingRows : optionalStatusRows;
+        target.push(row.effectiveRequired
+          ? [row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone, row.taskName, row.categoryName, reason]
+          : [row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.taskName, row.categoryName, '文件异常', reason]);
         continue;
       }
       const rendered = renderArchivePath(templateConfig, { ...row, originalName: file.originalName });
@@ -389,10 +498,10 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     }
     if (materialFileCount) approvedMaterialCount += 1;
     if (!files.length) {
-      missingRows.push([
-        row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone,
-        row.taskName, row.categoryName, '审核通过版本没有关联文件'
-      ]);
+      const reason = '审核通过版本没有关联文件';
+      (row.effectiveRequired ? missingRows : optionalStatusRows).push(row.effectiveRequired
+        ? [row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.owner, row.ownerPhone, row.taskName, row.categoryName, reason]
+        : [row.projectSequence, row.projectYear, row.projectGroup || '', row.projectCode, row.projectTitle, row.taskName, row.categoryName, '文件异常', reason]);
     }
   }
 
@@ -414,6 +523,20 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     ), { name: uniqueArchiveEntry('缺失材料报告.xlsx', usedEntries) });
   }
 
+  if (optionalStatusRows.length) {
+    zip.append(await xlsxBuffer(
+      ['项目序号', '年度', '组别', '项目编号', '作品名称', '材料任务', '材料类别', '状态', '说明'],
+      optionalStatusRows,
+      '选填材料状态报告'
+    ), { name: uniqueArchiveEntry('选填材料状态报告.xlsx', usedEntries) });
+  }
+
+  zip.append(await xlsxBuffer(
+    ['项目序号', '年度', '组别', '项目编号', '作品名称', '材料任务', '材料类别', '适用性', '必填性', '模板规则', '状态', '原因'],
+    matrixRows,
+    '材料适用性明细'
+  ), { name: uniqueArchiveEntry('材料适用性明细.xlsx', usedEntries) });
+
   const summaryLines = [
     `导出记录：${exportId}`,
     `生成时间：${new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })}`,
@@ -422,9 +545,11 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     `包含审核通过材料项：${approvedMaterialCount}`,
     `导出文件数：${exportedFileCount}`,
     `缺失报告条目：${missingRows.length}`,
+    `选填异常条目：${optionalStatusRows.length}`,
     '',
     '正式材料目录只包含每项材料最新一次“审核通过”的提交版本。',
-    '待审核、退回和未提交材料不会进入正式材料目录；没有审核通过版本的项目会列入缺失材料报告。'
+    '必填材料的待审核、退回和未提交进入缺失报告；选填材料未提交正常跳过，待审核或退回进入单独状态报告。',
+    '未实际发布给项目的任务标记为不适用，不计入缺失。'
   ];
   zip.append(summaryLines.join('\r\n'), { name: uniqueArchiveEntry('导出说明.txt', usedEntries) });
 
@@ -438,6 +563,9 @@ async function writeZip({ temporaryPath, finalPath, templateConfig, scope, rows,
     exportedFileCount,
     missingCount: missingRows.length,
     missingReportIncluded: missingRows.length > 0,
+    optionalIssueCount: optionalStatusRows.length,
+    optionalStatusReportIncluded: optionalStatusRows.length > 0,
+    matrixReportIncluded: true,
     fileSize: stat.size
   };
 }

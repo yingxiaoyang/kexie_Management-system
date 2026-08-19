@@ -61,8 +61,8 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-width="104px" class="export-scope-form">
         <el-form-item label="归档模板" prop="archiveTemplateId"><el-select v-model="form.archiveTemplateId" filterable placeholder="选择已启用模板" style="width: 100%" @change="onTemplateChange"><el-option v-for="item in templates" :key="item.id" :label="item.templateName" :value="item.id" /></el-select></el-form-item>
         <el-divider content-position="left">结构化导出范围</el-divider>
-        <el-form-item label="年度"><el-select v-model="form.years" multiple collapse-tags clearable placeholder="选择年度（可多选）" style="width: 100%"><el-option v-for="year in options.years" :key="year" :label="`${year} 年`" :value="year" /></el-select></el-form-item>
-        <el-form-item label="组别"><el-select v-model="form.groups" multiple collapse-tags clearable placeholder="选择组别（可多选）" style="width: 100%"><el-option v-for="group in options.groups" :key="group" :label="group" :value="group" /></el-select></el-form-item>
+        <el-form-item label="年度"><el-select v-model="form.years" multiple collapse-tags clearable placeholder="选择年度（可多选）" style="width: 100%"><el-option v-for="year in options.years" :key="year" :label="`${year} 年`" :value="year" /></el-select><el-button text @click="form.years=[...options.years]">全选年度</el-button></el-form-item>
+        <el-form-item label="组别"><el-select v-model="form.groups" multiple collapse-tags clearable placeholder="选择组别（可多选）" style="width: 100%"><el-option v-for="group in options.groups" :key="group" :label="group" :value="group" /></el-select><el-button text @click="form.groups=[...options.groups]">全选组别</el-button></el-form-item>
         <el-form-item label="统筹任务" prop="materialTaskIds"><el-select v-model="form.materialTaskIds" multiple collapse-tags filterable placeholder="模板内的统筹任务" style="width: 100%"><el-option v-for="item in filteredMaterialTasks" :key="item.id" :label="`${item.taskName}（${taskStatusLabel(item.status)}）`" :value="item.id" /></el-select><p class="table-note">只显示已放入当前归档模板的统筹任务；选择模板后默认全部选中。</p></el-form-item>
         <el-form-item label="指定项目"><el-select v-model="form.projectIds" multiple collapse-tags filterable clearable placeholder="可进一步指定项目" style="width: 100%"><el-option v-for="item in filteredProjects" :key="item.id" :label="`${item.projectCode}｜${item.title}`" :value="item.id" /></el-select></el-form-item>
         <el-form-item label="导出备注"><el-input v-model="form.remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="可填写本次整理包用途或交接说明" /></el-form-item>
@@ -92,7 +92,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { apiRequest, downloadFile } from '../../services/http'
 
 const records = ref([])
@@ -195,9 +195,17 @@ async function createExport() {
   if (!form.years.length && !form.groups.length && !form.projectIds.length) return ElMessage.warning('请至少选择年度、组别或指定项目中的一种范围')
   creating.value = true
   try {
+    const preflight = await apiRequest('/archive-exports/preflight', {
+      method: 'POST', body: { archiveTemplateId: form.archiveTemplateId, scope: { years: form.years, groups: form.groups, materialTaskIds: form.materialTaskIds, projectIds: form.projectIds } },
+    })
+    const c = preflight.data.counts
+    await ElMessageBox.confirm(
+      `项目 ${c.projectCount} 个；适用任务 ${c.applicableTaskCount} 项；正式材料 ${c.formalMaterialCount} 项；必填缺失/待审/退回 ${c.requiredMissingCount}/${c.requiredPendingCount}/${c.requiredReturnedCount}；选填未提交 ${c.optionalNotSubmittedCount}；选填异常 ${c.optionalAnomalyCount}；不适用 ${c.notApplicableCount}。`,
+      '确认导出预检', { confirmButtonText: '确认并入队', cancelButtonText: '返回修改' },
+    )
     await apiRequest('/archive-exports', {
       method: 'POST',
-      body: { archiveTemplateId: form.archiveTemplateId, scope: { years: form.years, groups: form.groups, materialTaskIds: form.materialTaskIds, projectIds: form.projectIds }, remark: form.remark },
+      body: { archiveTemplateId: form.archiveTemplateId, scope: preflight.data.scopeSnapshot, remark: form.remark },
     })
     ElMessage.success('导出任务已加入队列')
     dialogVisible.value = false
@@ -205,7 +213,7 @@ async function createExport() {
     pagination.page = 1
     await loadRecords()
   } catch (error) {
-    ElMessage.error(error.message)
+    if (error !== 'cancel') ElMessage.error(error.message)
   } finally {
     creating.value = false
   }

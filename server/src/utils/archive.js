@@ -86,6 +86,9 @@ function normalizeV2(raw) {
       }
       fileTaskIds.add(fileTaskId);
       taskCount += 1;
+      const explicitMode = ['inherit', 'required', 'optional'].includes(item.requiredMode)
+        ? item.requiredMode
+        : (typeof item.isRequired === 'boolean' ? (item.isRequired ? 'required' : 'optional') : 'inherit');
       return {
         id,
         type: 'task',
@@ -93,7 +96,9 @@ function normalizeV2(raw) {
         fileTaskId,
         materialTaskName: String(item.materialTaskName || '').trim().slice(0, 160),
         fileTaskName: String(item.fileTaskName || '').trim().slice(0, 120),
-        fileNameRule: cleanPattern(item.fileNameRule || defaultFileNameRule, `${nodePath}.fileNameRule`, 240)
+        fileNameRule: cleanPattern(item.fileNameRule || defaultFileNameRule, `${nodePath}.fileNameRule`, 240),
+        requiredMode: explicitMode,
+        requiredReviewNeeded: item.requiredMode == null && typeof item.isRequired !== 'boolean'
       };
     });
   }
@@ -203,7 +208,9 @@ export function archivePlacements(configInput) {
   return walkTree(config.nodes).filter((item) => item.node.type === 'task').map((item) => ({
     ...item,
     fileTaskId: Number(item.node.fileTaskId),
-    materialTaskId: Number(item.node.materialTaskId)
+    materialTaskId: Number(item.node.materialTaskId),
+    requiredMode: item.node.requiredMode || 'inherit',
+    requiredReviewNeeded: Boolean(item.node.requiredReviewNeeded)
   }));
 }
 
@@ -297,8 +304,13 @@ export function uniqueArchiveEntry(entryName, usedEntries) {
 }
 
 export function csvText(headers, rows) {
-  const escapeCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const escapeCell = (value) => `"${safeSpreadsheetText(value).replace(/"/g, '""')}"`;
   return `\ufeff${[headers, ...rows].map((row) => row.map(escapeCell).join(',')).join('\r\n')}`;
+}
+
+export function safeSpreadsheetText(value) {
+  const text = String(value ?? '');
+  return /^[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
 export { xlsxBuffer };

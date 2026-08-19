@@ -13,6 +13,7 @@ import { requireAdminPermission, requirePermissionWhenAdmin, requireSuperAdmin }
 import { filePreviewInfo, inspectOriginalFileName, matchesPreviewSignature, setFileResponseHeaders } from '../utils/fileNames.js';
 import { expectedAssignmentVersion, parseSubmissionIds, sanitizeZipSegment, uniqueZipEntryName } from '../utils/materialReview.js';
 import { reviewProjectChangeSubmission } from '../services/projectChangeService.js';
+import { releaseSatisfiedMaterialRestrictions, scanOverdueRequiredMaterials } from '../services/participationEligibilityService.js';
 
 const router = Router();
 
@@ -339,7 +340,7 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermi
     await connection.beginTransaction();
     transactionActive = true;
     const [[submission]] = await connection.execute(
-      `SELECT ms.id, ms.project_id AS projectId, ms.review_status AS reviewStatus,
+      `SELECT ms.id, ms.project_id AS projectId, ms.material_task_id AS materialTaskId, ms.review_status AS reviewStatus,
               ms.assigned_to AS assignedTo, ms.assignment_version AS assignmentVersion,
               mt.task_type AS taskType
        FROM material_submissions ms JOIN material_tasks mt ON mt.id = ms.material_task_id
@@ -373,6 +374,16 @@ router.patch('/:id/review', requireAuth, requireRole('admin'), requireAdminPermi
       projectChange = await reviewProjectChangeSubmission(connection, {
         submissionId: submission.id, action, reason, reviewer: req.user, expectedAssignmentVersion: expectedVersion
       });
+    }
+    if (submission.taskType === 'standard') {
+      await scanOverdueRequiredMaterials(connection, {
+        materialTaskId: submission.materialTaskId, actorUserId: req.user.id, triggerSource: 'business_event'
+      });
+      if (action === 'approve') {
+        await releaseSatisfiedMaterialRestrictions(connection, submission.projectId, submission.materialTaskId, {
+          actorUserId: req.user.id
+        });
+      }
     }
     await connection.execute(
       `INSERT INTO material_review_audit_events

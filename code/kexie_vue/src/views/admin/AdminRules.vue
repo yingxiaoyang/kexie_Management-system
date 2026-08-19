@@ -1,47 +1,40 @@
 <template>
   <div>
-    <div class="page-header">
-      <div><h2 class="page-title">参与规则</h2><p class="page-desc">导入或编辑项目参与关系时，用这些规则提前拦截违规数据。</p></div>
-      <el-button type="primary" @click="openCreate"><el-icon><Plus /></el-icon>新建规则</el-button>
+    <div class="page-header"><div><h2 class="page-title">参与规则与跨届限制</h2><p class="page-desc">限制只作用于指定的下一项目年度；每个触发原因独立保留审计。</p></div><div><el-button @click="exportHistory">导出历史</el-button><el-button v-if="isSuper" type="primary" :loading="scanning" @click="scan">扫描逾期材料</el-button></div></div>
+    <el-tabs v-model="activeTab" @tab-change="loadData"><el-tab-pane label="当前限制" name="active" /><el-tab-pane label="历史记录" name="released" /><el-tab-pane label="数量规则" name="rules" /></el-tabs>
+    <div v-if="activeTab !== 'rules'" class="panel">
+      <div class="toolbar"><div class="filters"><el-input v-model="filters.keyword" clearable placeholder="姓名、学号或来源项目" @keyup.enter="search" /><el-input-number v-model="filters.year" :min="2000" :max="2100" placeholder="限制年度" /><el-select v-model="filters.reason" clearable placeholder="触发原因" style="width:190px"><el-option label="必填材料逾期未通过" value="missing_required_material" /><el-option label="项目终止" value="project_terminated" /></el-select><el-button @click="search">查询</el-button></div></div>
+      <el-table v-loading="loading" :data="restrictions" empty-text="暂无记录">
+        <el-table-column prop="restrictionYear" label="限制年度" width="105" /><el-table-column label="受限人员" min-width="150"><template #default="{row}"><strong>{{ row.name }}</strong><div class="table-note">{{ row.studentNo || '未登记学号' }}</div></template></el-table-column>
+        <el-table-column prop="reasonLabel" label="原因" min-width="170" /><el-table-column label="来源" min-width="240"><template #default="{row}">{{ row.sourceProjectCode }}｜{{ row.sourceProjectTitle }}<div v-if="row.sourceTaskName" class="table-note">{{ row.sourceTaskName }}</div></template></el-table-column>
+        <el-table-column label="触发 / 解除" min-width="185"><template #default="{row}">{{ formatTime(row.triggeredAt) }}<div v-if="row.releasedAt" class="table-note">解除：{{ formatTime(row.releasedAt) }}</div></template></el-table-column>
+        <el-table-column v-if="activeTab==='released'" prop="releaseReason" label="解除原因" min-width="220" show-overflow-tooltip /><el-table-column label="操作" width="155"><template #default="{row}"><el-button text @click="showAudit(row)">审计</el-button><el-button v-if="isSuper" text @click="changeStatus(row)">{{ activeTab==='active'?'解除':'恢复' }}</el-button></template></el-table-column>
+      </el-table><div v-if="pagination.total" class="pagination-row"><el-pagination v-model:current-page="pagination.page" :page-size="pagination.pageSize" :total="pagination.total" layout="total, prev, pager, next" @current-change="loadRestrictions" /></div>
     </div>
-    <div class="panel">
-      <el-table v-loading="loading" :data="rules" style="width: 100%" empty-text="暂无参与规则">
-        <el-table-column prop="ruleName" label="规则名称" min-width="180" />
-        <el-table-column prop="ruleKey" label="规则标识" min-width="220" />
-        <el-table-column label="数量上限" width="110"><template #default="{ row }">{{ row.limitCount }}</template></el-table-column>
-        <el-table-column prop="remark" label="说明" min-width="220" show-overflow-tooltip />
-        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="170" fixed="right"><template #default="{ row }"><el-button text @click="openEdit(row)">编辑</el-button><el-button text @click="toggleStatus(row)">{{ row.enabled ? '停用' : '启用' }}</el-button></template></el-table-column>
-      </el-table>
-    </div>
-    <el-dialog v-model="dialogVisible" :title="form.id ? '编辑参与规则' : '新建参与规则'" width="560px">
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="92px">
-        <el-form-item label="规则名称" prop="ruleName"><el-input v-model.trim="form.ruleName" /></el-form-item>
-        <el-form-item label="规则标识" prop="ruleKey"><el-input v-model.trim="form.ruleKey" :disabled="Boolean(form.id)" placeholder="例如 max_owner_projects" /></el-form-item>
-        <el-form-item label="数量上限" prop="limitCount"><el-input-number v-model="form.limitCount" :min="1" :max="100" /></el-form-item>
-        <el-form-item label="启用状态"><el-switch v-model="form.enabled" /></el-form-item>
-        <el-form-item label="说明"><el-input v-model.trim="form.remark" type="textarea" :rows="3" maxlength="500" show-word-limit /></el-form-item>
-      </el-form>
-      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
-    </el-dialog>
+    <div v-else class="panel"><div class="toolbar"><el-button type="primary" @click="openCreate">新建规则</el-button></div><el-table v-loading="rulesLoading" :data="rules"><el-table-column prop="ruleName" label="规则名称" /><el-table-column prop="ruleKey" label="规则标识" min-width="220" /><el-table-column prop="limitCount" label="上限" width="90" /><el-table-column prop="remark" label="说明" /><el-table-column label="状态" width="90"><template #default="{row}">{{ row.enabled?'启用':'停用' }}</template></el-table-column><el-table-column label="操作" width="160"><template #default="{row}"><el-button text @click="openEdit(row)">编辑</el-button><el-button text @click="toggleStatus(row)">{{ row.enabled?'停用':'启用' }}</el-button></template></el-table-column></el-table></div>
+    <el-dialog v-model="dialogVisible" :title="form.id?'编辑参与规则':'新建参与规则'" width="560px"><el-form ref="formRef" :model="form" :rules="formRules" label-width="92px"><el-form-item label="规则名称" prop="ruleName"><el-input v-model.trim="form.ruleName" /></el-form-item><el-form-item label="规则标识" prop="ruleKey"><el-input v-model.trim="form.ruleKey" :disabled="Boolean(form.id)" /></el-form-item><el-form-item label="数量上限"><el-input-number v-model="form.limitCount" :min="1" :max="100" /></el-form-item><el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item><el-form-item label="说明"><el-input v-model.trim="form.remark" type="textarea" /></el-form-item></el-form><template #footer><el-button @click="dialogVisible=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template></el-dialog>
+    <el-dialog v-model="auditVisible" title="限制审计历史" width="680px"><el-timeline><el-timeline-item v-for="event in auditEvents" :key="event.id" :timestamp="formatTime(event.createdAt)"><strong>{{ eventLabel(event.eventType) }}</strong><p>{{ event.reason }}</p><span class="table-note">{{ event.actorName || '系统' }} · {{ event.actorSource }}</span></el-timeline-item></el-timeline></el-dialog>
   </div>
 </template>
-
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { apiRequest } from '../../services/http'
-
-const rules = ref([]), loading = ref(false), saving = ref(false), dialogVisible = ref(false), formRef = ref()
-const form = reactive({ id: null, ruleKey: '', ruleName: '', limitCount: 1, enabled: true, remark: '' })
-const formRules = {
-  ruleName: [{ required: true, message: '请输入规则名称', trigger: 'blur' }],
-  ruleKey: [{ required: true, message: '请输入规则标识', trigger: 'blur' }, { pattern: /^[a-z][a-z0-9_]{2,79}$/, message: '仅支持小写字母、数字和下划线', trigger: 'blur' }],
-}
-async function loadRules() { loading.value = true; try { rules.value = (await apiRequest('/participation-rules')).data } catch (error) { ElMessage.error(error.message) } finally { loading.value = false } }
-function openCreate() { Object.assign(form, { id: null, ruleKey: '', ruleName: '', limitCount: 1, enabled: true, remark: '' }); dialogVisible.value = true }
-function openEdit(row) { Object.assign(form, row); dialogVisible.value = true }
-async function save() { if (!(await formRef.value?.validate().catch(() => false))) return; saving.value = true; try { await apiRequest(form.id ? `/participation-rules/${form.id}` : '/participation-rules', { method: form.id ? 'PUT' : 'POST', body: form }); ElMessage.success('参与规则已保存'); dialogVisible.value = false; await loadRules() } catch (error) { ElMessage.error(error.message) } finally { saving.value = false } }
-async function toggleStatus(row) { try { await apiRequest(`/participation-rules/${row.id}/status`, { method: 'PATCH', body: { enabled: !row.enabled } }); ElMessage.success('规则状态已更新'); await loadRules() } catch (error) { ElMessage.error(error.message) } }
-onMounted(loadRules)
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiRequest, downloadFile } from '../../services/http'
+import { authStore } from '../../stores/auth'
+const activeTab=ref('active'),restrictions=ref([]),loading=ref(false),scanning=ref(false),filters=reactive({keyword:'',year:null,reason:''}),pagination=reactive({page:1,pageSize:20,total:0})
+const rules=ref([]),rulesLoading=ref(false),saving=ref(false),dialogVisible=ref(false),formRef=ref(),form=reactive({id:null,ruleKey:'',ruleName:'',limitCount:1,enabled:true,remark:''})
+const auditVisible=ref(false),auditEvents=ref([])
+const formRules={ruleName:[{required:true,message:'请输入规则名称'}],ruleKey:[{required:true,pattern:/^[a-z][a-z0-9_]{2,79}$/,message:'规则标识格式无效'}]},isSuper=computed(()=>authStore.isSuperAdmin())
+function query(){const q=new URLSearchParams({page:pagination.page,pageSize:pagination.pageSize,status:activeTab.value});if(filters.keyword)q.set('keyword',filters.keyword);if(filters.year)q.set('year',filters.year);if(filters.reason)q.set('reason',filters.reason);return q}
+async function loadRestrictions(){loading.value=true;try{const r=await apiRequest(`/participation-rules/restrictions?${query()}`);restrictions.value=r.data;Object.assign(pagination,r.pagination)}catch(e){ElMessage.error(e.message)}finally{loading.value=false}}
+async function loadRules(){rulesLoading.value=true;try{rules.value=(await apiRequest('/participation-rules')).data}catch(e){ElMessage.error(e.message)}finally{rulesLoading.value=false}}
+function loadData(){activeTab.value==='rules'?loadRules():loadRestrictions()} function search(){pagination.page=1;loadRestrictions()}
+async function exportHistory(){try{const q=query();q.delete('page');q.delete('pageSize');await downloadFile(`/participation-rules/restrictions/export?${q}`,'跨届限制历史.csv')}catch(e){ElMessage.error(e.message)}}
+async function scan(){try{await ElMessageBox.confirm('重复扫描不会产生重复限制。','确认扫描');scanning.value=true;const r=await apiRequest('/participation-rules/restrictions/scan',{method:'POST',body:{}});ElMessage.success(`新增 ${r.data.created} 条限制`);await loadRestrictions()}catch(e){if(e!=='cancel')ElMessage.error(e.message)}finally{scanning.value=false}}
+async function changeStatus(row){try{const action=activeTab.value==='active'?'解除':'恢复';const {value}=await ElMessageBox.prompt(`请输入${action}的书面依据`,`${action}限制`,{inputType:'textarea',inputValidator:t=>Boolean(t?.trim())||'必须填写原因'});await apiRequest(`/participation-rules/restrictions/${row.id}/status`,{method:'PATCH',body:{status:activeTab.value==='active'?'released':'active',reason:value}});await loadRestrictions()}catch(e){if(e!=='cancel')ElMessage.error(e.message)}}
+async function showAudit(row){try{auditEvents.value=(await apiRequest(`/participation-rules/restrictions/${row.id}/events`)).data;auditVisible.value=true}catch(e){ElMessage.error(e.message)}} const eventLabel=v=>({triggered:'触发限制',auto_released:'系统自动解除',manual_released:'手工解除',manual_restored:'手工恢复'}[v]||v)
+function openCreate(){Object.assign(form,{id:null,ruleKey:'',ruleName:'',limitCount:1,enabled:true,remark:''});dialogVisible.value=true} function openEdit(row){Object.assign(form,row);dialogVisible.value=true}
+async function save(){if(!(await formRef.value?.validate().catch(()=>false)))return;saving.value=true;try{await apiRequest(form.id?`/participation-rules/${form.id}`:'/participation-rules',{method:form.id?'PUT':'POST',body:form});dialogVisible.value=false;await loadRules()}catch(e){ElMessage.error(e.message)}finally{saving.value=false}}
+async function toggleStatus(row){try{await apiRequest(`/participation-rules/${row.id}/status`,{method:'PATCH',body:{enabled:!row.enabled}});await loadRules()}catch(e){ElMessage.error(e.message)}} const formatTime=v=>v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'-'
+onMounted(loadRestrictions)
 </script>

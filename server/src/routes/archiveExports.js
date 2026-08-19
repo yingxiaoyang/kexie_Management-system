@@ -12,6 +12,7 @@ import {
   exportStatuses,
   normalizeScope,
   parseJson,
+  preflightArchiveExport,
   retryArchiveExport,
   scopeLabel,
   validateAndEnqueueArchiveExport
@@ -108,6 +109,15 @@ router.post('/', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/preflight', async (req, res, next) => {
+  try {
+    const archiveTemplateId = Number(req.body.archiveTemplateId);
+    if (!archiveTemplateId) throw badRequest('archiveTemplateId is required', 'VALIDATION_ERROR');
+    const result = await preflightArchiveExport({ archiveTemplateId, rawScope: req.body.scope });
+    success(res, result, '导出预检完成');
+  } catch (error) { next(error); }
 });
 
 router.post('/:id/retry', async (req, res, next) => {

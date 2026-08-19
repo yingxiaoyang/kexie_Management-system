@@ -1,6 +1,6 @@
 import { badRequest, notFound } from './errors.js';
 
-export const FORMAL_PROJECT_STATUSES = Object.freeze(['active', 'checking', 'completed', 'archived', 'stopped']);
+export const FORMAL_PROJECT_STATUSES = Object.freeze(['active', 'checking', 'completed', 'archived', 'stopped', 'terminated']);
 
 export function isFormalProjectStatus(status) {
   return FORMAL_PROJECT_STATUSES.includes(status);

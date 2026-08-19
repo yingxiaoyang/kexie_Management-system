@@ -45,7 +45,8 @@ export function participationSnapshot(rows) {
 
 export function timelineState(event) {
   if (event.state) return event.state;
-  if (event.eventType === 'project_status_changed' && event.changes?.some((change) => change.field === 'status' && change.after === 'stopped')) return 'exception';
+  if (event.eventType === 'project_status_changed' && event.changes?.some((change) => change.field === 'status' && ['stopped', 'terminated'].includes(change.after))) return 'exception';
+  if (['participation_restriction_triggered', 'participation_restriction_restored'].includes(event.eventType)) return 'exception';
   if (event.eventType === 'material_returned' || event.eventType === 'application_returned' || event.eventType === 'project_stopped') return 'exception';
   if (event.eventType === 'material_submitted' && event.reviewStatus === 'pending') return 'current';
   return 'completed';
@@ -397,6 +398,13 @@ export async function loadProjectWorkspace(connection, projectId, user) {
      WHERE audit.project_id = ? AND audit.event_type IN ('submitted', 'returned', 'approved')
      ORDER BY audit.created_at DESC, audit.id DESC`, [projectId]
   );
+  const [restrictions] = await connection.execute(
+    `SELECT pr.id, pr.person_id AS personId, pe.name, pr.restriction_year AS restrictionYear,
+            pr.trigger_reason AS triggerReason, mt.task_name AS sourceTaskName, pr.triggered_at AS triggeredAt
+     FROM participation_restrictions pr JOIN people pe ON pe.id = pr.person_id
+     LEFT JOIN material_tasks mt ON mt.id = pr.source_material_task_id
+     WHERE pr.source_project_id = ? AND pr.status = 'active' ORDER BY pr.restriction_year, pe.name`, [projectId]
+  );
   const materials = groupMaterials(taskRows, submissionRows, fileRows);
   const timeline = buildProjectTimeline({ project, source, auditEvents, applicationEvents, importEvents, submissions: submissionRows, materialReviewEvents, projectChangeEvents });
   const completedMaterials = submissionRows.filter((row) => row.reviewStatus === 'approved').length;
@@ -406,6 +414,7 @@ export async function loadProjectWorkspace(connection, projectId, user) {
     participations,
     materials,
     timeline,
+    activeRestrictions: restrictions,
     capabilities: { canEditProject: user.role === 'admin', canEditParticipations: user.role === 'admin', isReadOnly: user.role !== 'admin' },
     summary: {
       participantCount: participations.length,

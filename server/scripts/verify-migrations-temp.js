@@ -37,7 +37,7 @@ try {
 
   const migrationsDir = path.join(projectRoot, 'database', 'migrations');
   const migrations = (await fs.readdir(migrationsDir)).filter((name) => /^\d+_.+\.sql$/i.test(name)).sort();
-  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015']);
+  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016']);
   for (const migration of migrations) {
     if (migration === '011_application_approval_loop.sql') {
       const [firstPerson] = await database.execute(
@@ -185,6 +185,32 @@ try {
      VALUES ('迁移验证变更任务', 'project_change', 'midterm', JSON_OBJECT('members', true, 'advisors', true, 'owner', true), 'all', 'published', ?)`,
     [superAdmin.insertId]
   );
+  const [[restrictionTables]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('participation_restrictions', 'participation_restriction_events')`,
+    [databaseName]
+  );
+  assert.equal(Number(restrictionTables.total), 2, '016 must add restriction records and immutable events');
+  const [[terminatedEnum]] = await database.execute(
+    `SELECT COLUMN_TYPE AS columnType FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'projects' AND COLUMN_NAME = 'status'`, [databaseName]
+  );
+  assert.match(terminatedEnum.columnType, /terminated/, '016 must add terminated project status');
+  const [restriction] = await database.execute(
+    `INSERT INTO participation_restrictions
+     (person_id, restriction_year, trigger_reason, source_project_id, trigger_source)
+     VALUES (?, 2100, 'project_terminated', ?, 'business_event')`,
+    [person.insertId, validProject.insertId]
+  );
+  await database.execute(
+    `INSERT INTO participation_restriction_events
+     (restriction_id, event_type, actor_source, reason) VALUES (?, 'triggered', 'system', '迁移验证')`,
+    [restriction.insertId]
+  );
+  await assert.rejects(
+    () => database.execute('DELETE FROM participation_restriction_events WHERE restriction_id = ?', [restriction.insertId]),
+    /participation restriction events are immutable/
+  );
 
   process.stdout.write(`Temporary schema verified: ${Number(tableCount.total)} tables, ${Number(columnCount.total)} columns.\n`);
   process.stdout.write('Owner invariant transaction checks passed.\n');
@@ -192,6 +218,7 @@ try {
   process.stdout.write('Project workspace audit migration checks passed.\n');
   process.stdout.write('Material review assignment migration checks passed.\n');
   process.stdout.write('Project change approval migration checks passed.\n');
+  process.stdout.write('Cross-year restriction migration checks passed.\n');
 } finally {
   await database?.end().catch(() => undefined);
   if (admin && created) await admin.query(`DROP DATABASE \`${databaseName}\``);

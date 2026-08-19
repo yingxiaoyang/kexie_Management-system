@@ -1,6 +1,7 @@
 import { badRequest, conflict, notFound } from '../utils/errors.js';
 import { normalizeChangePlan, assertPlanWithinScope, changeSummary } from '../utils/projectChange.js';
 import { participationSnapshot, writeProjectAudit } from './projectWorkspaceService.js';
+import { assertPeopleEligibleForYear, scanOverdueRequiredMaterials } from './participationEligibilityService.js';
 
 function json(value, fallback = {}) {
   if (value && typeof value === 'object') return value;
@@ -94,6 +95,12 @@ async function validatePlanPeople(connection, plan, currentOwnerId, projectId, l
     }
     await assertProjectOwnerCandidateQualified(connection, plan.ownerChange.newOwnerPersonId, projectId, { lock });
   }
+  const [[project]] = await connection.execute(
+    'SELECT project_year AS projectYear FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1', [projectId]
+  );
+  await assertPeopleEligibleForYear(connection,
+    [...plan.members.addPersonIds, ...(plan.ownerChange ? [plan.ownerChange.newOwnerPersonId] : [])],
+    project.projectYear, '项目变更');
 }
 
 export async function validateProjectChangePlan(connection, { projectId, plan: rawPlan, changeScope, lock = false }) {
@@ -215,6 +222,9 @@ export async function reviewProjectChangeSubmission(connection, {
   );
   if (Number(ownerCount.count) !== 1) throw conflict('负责人转移未能保持唯一负责人，操作已回滚', 'PROJECT_OWNER_ATOMICITY_FAILED');
   const after = await loadProjectChangeSnapshot(connection, row.projectId);
+  await scanOverdueRequiredMaterials(connection, {
+    projectId: Number(row.projectId), actorUserId: reviewer.id, triggerSource: 'business_event'
+  });
   await connection.execute(
     `UPDATE project_change_requests SET status = 'approved', return_reason = NULL, reviewed_by = ?,
      reviewed_at = NOW(), effective_at = NOW(), updated_at = NOW() WHERE id = ? AND status = 'submitted'`,

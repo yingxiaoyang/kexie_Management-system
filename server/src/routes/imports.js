@@ -12,6 +12,7 @@ import { EXCEL_LIMITS, readWorkbook, worksheetRows, xlsxBuffer } from '../utils/
 import { affectedProjectIds, assertFormalProjectOwnership, isFormalProjectStatus, ownershipProjectIdsForPeople } from '../utils/projectOwnership.js';
 import { success } from '../utils/response.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
+import { assertPeopleEligibleForYear, restrictTerminatedProject, scanOverdueRequiredMaterials } from '../services/participationEligibilityService.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: EXCEL_LIMITS.maxFileBytes, files: 1 } });
@@ -20,7 +21,7 @@ const importRoot = path.resolve(env.upload.root, '../imports');
 const originalDir = path.join(importRoot, 'originals');
 
 const CLEAR_MARK = '[清空]';
-const validProjectStatuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped'];
+const validProjectStatuses = ['draft', 'active', 'checking', 'completed', 'archived', 'stopped', 'terminated'];
 const validApprovalTypes = ['first', 'supplement'];
 const validPersonTypes = ['student', 'teacher'];
 const validAccountStatuses = ['none', 'enabled', 'disabled'];
@@ -30,7 +31,7 @@ const validCheckPhases = ['midterm', 'stage'];
 const valueAliases = {
   projectStatus: new Map([
     ['草稿', 'draft'], ['进行中', 'active'], ['检查中', 'checking'], ['已完成', 'completed'],
-    ['已归档', 'archived'], ['已终止', 'stopped']
+    ['已归档', 'archived'], ['已终止', 'terminated']
   ]),
   approvalType: new Map([['首次立项', 'first'], ['补充立项', 'supplement']]),
   personType: new Map([['学生', 'student'], ['教师', 'teacher'], ['老师', 'teacher']]),
@@ -973,6 +974,10 @@ async function applyPersonRecord(connection, record) {
 async function applyParticipationRecord(connection, record) {
   const after = record.afterSnapshot;
   if (record.operationType === 'skip') return null;
+  if (['create', 'update'].includes(record.operationType) && ['owner', 'member'].includes(after.role)) {
+    const [[project]] = await connection.execute('SELECT project_year AS projectYear FROM projects WHERE id = ? LIMIT 1 FOR UPDATE', [after.project_id]);
+    await assertPeopleEligibleForYear(connection, [after.person_id], project.projectYear, '批量导入项目人员');
+  }
   if (record.operationType === 'remove') {
     await connection.execute('UPDATE project_participations SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?', [record.targetId]);
     return record.targetId;
@@ -1064,7 +1069,12 @@ async function commitPlannedBatch(batchUuid, userId) {
     }
     const changedPersonIds = applied.filter((record) => record.entityType === 'person' && record.targetId).map((record) => record.targetId);
     const ownerProjectsForPeople = await ownershipProjectIdsForPeople(connection, changedPersonIds);
-    await assertFormalProjectOwnership(connection, [...affectedProjectIds(applied), ...ownerProjectsForPeople]);
+    const changedProjectIds = [...new Set([...affectedProjectIds(applied), ...ownerProjectsForPeople])];
+    await assertFormalProjectOwnership(connection, changedProjectIds);
+    for (const projectId of changedProjectIds) {
+      await restrictTerminatedProject(connection, projectId, { actorUserId: userId, triggerSource: 'business_event' });
+      await scanOverdueRequiredMaterials(connection, { projectId, actorUserId: userId, triggerSource: 'business_event' });
+    }
     const nextSummary = { ...summary, applied: applied.filter((record) => record.status === 'applied').length };
     await connection.execute(
       `UPDATE import_batches SET status = 'committed', committed_by = ?, committed_at = NOW(), summary_json = CAST(? AS JSON) WHERE id = ?`,
@@ -1419,6 +1429,10 @@ async function commitStandardWorkbook(batch, userId) {
     const peopleMap = new Map(peopleRows.map((row) => [row.student_no || row.teacher_no, row.id]));
     for (const row of data.participations || []) {
       const values = [projectMap.get(clean(row.project_code)), peopleMap.get(clean(row.person_identifier)), clean(row.role), boolValue(row.is_primary_owner), optional(row.joined_at), optional(row.remark)];
+      if (['owner', 'member'].includes(values[2])) {
+        const [[projectYear]] = await connection.execute('SELECT project_year AS projectYear FROM projects WHERE id = ? LIMIT 1 FOR UPDATE', [values[0]]);
+        await assertPeopleEligibleForYear(connection, [values[1]], projectYear.projectYear, '标准工作簿项目人员');
+      }
       await connection.execute(
         `INSERT INTO project_participations (project_id, person_id, role, is_primary_owner, joined_at, remark)
          VALUES (?, ?, ?, ?, ?, ?)
@@ -1430,6 +1444,10 @@ async function commitStandardWorkbook(batch, userId) {
     const importedPersonIds = (data.people || []).map((row) => peopleMap.get(clean(row.student_no || row.teacher_no))).filter(Boolean);
     const ownerProjectsForPeople = await ownershipProjectIdsForPeople(connection, importedPersonIds);
     await assertFormalProjectOwnership(connection, [...importedProjectIds, ...ownerProjectsForPeople]);
+    for (const projectId of importedProjectIds) {
+      await restrictTerminatedProject(connection, projectId, { actorUserId: userId, triggerSource: 'business_event' });
+      await scanOverdueRequiredMaterials(connection, { projectId, actorUserId: userId, triggerSource: 'business_event' });
+    }
     for (const row of data.checks || []) {
       await connection.execute(
         `INSERT INTO project_check_records (project_id, check_phase, research_log_count, rating, checked_at, remark)
