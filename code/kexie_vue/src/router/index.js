@@ -23,6 +23,7 @@ const routes = [
     children: [
       { path: 'dashboard', name: 'owner-dashboard', component: () => import('../views/owner/OwnerDashboard.vue'), meta: { title: '负责人工作台' } },
       { path: 'projects', name: 'owner-projects', component: () => import('../views/owner/OwnerProjects.vue'), meta: { title: '我的项目' } },
+      { path: 'projects/:id', name: 'owner-project-workspace', component: () => import('../components/ProjectWorkspace.vue'), meta: { title: '项目全景详情' } },
       { path: 'submissions', name: 'owner-submissions', component: () => import('../views/owner/OwnerSubmissions.vue'), meta: { title: '材料提交' } },
       { path: 'contacts', name: 'owner-contacts', component: () => import('../views/owner/OwnerContacts.vue'), meta: { title: '项目通讯录' } },
     ],
@@ -35,6 +36,7 @@ const routes = [
     children: [
       { path: 'dashboard', name: 'admin-dashboard', component: () => import('../views/admin/AdminDashboard.vue'), meta: { title: '管理员总览' } },
       { path: 'projects', name: 'admin-projects', component: () => import('../views/admin/AdminProjects.vue'), meta: { title: '项目管理', permission: 'project_management' } },
+      { path: 'projects/:id', name: 'admin-project-workspace', component: () => import('../components/ProjectWorkspace.vue'), meta: { title: '项目全景工作台', permission: 'project_management' } },
       { path: 'imports', name: 'admin-imports', component: () => import('../views/admin/AdminImports.vue'), meta: { title: '数据导入', permission: 'data_import' } },
       { path: 'people', name: 'admin-people', component: () => import('../views/admin/AdminPeople.vue'), meta: { title: '人员库管理', permission: 'people_management' } },
       { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AdminAccounts.vue'), meta: { title: '账号管理', superAdmin: true } },

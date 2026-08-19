@@ -37,7 +37,7 @@ try {
 
   const migrationsDir = path.join(projectRoot, 'database', 'migrations');
   const migrations = (await fs.readdir(migrationsDir)).filter((name) => /^\d+_.+\.sql$/i.test(name)).sort();
-  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012']);
+  assert.deepEqual(migrations.map((name) => name.slice(0, 3)), ['001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013']);
   for (const migration of migrations) {
     if (migration === '011_application_approval_loop.sql') {
       const [firstPerson] = await database.execute(
@@ -133,9 +133,31 @@ try {
   await database.execute("UPDATE projects SET status = 'active' WHERE id = ?", [validProject.insertId]);
   await assertFormalProjectOwnership(database, [Number(validProject.insertId)]);
 
+  await database.execute(
+    `INSERT INTO project_audit_events
+     (project_id, event_type, actor_user_id, source_module, field_changes, event_payload)
+     VALUES (?, 'project_fields_changed', ?, '项目管理', JSON_ARRAY(JSON_OBJECT('field', 'title', 'before', '旧名称', 'after', '新名称')), JSON_OBJECT('summary', '迁移验证'))`,
+    [validProject.insertId, limitedAdmin.insertId]
+  );
+  await assert.rejects(
+    () => database.execute("UPDATE project_audit_events SET source_module = '篡改' WHERE project_id = ?", [validProject.insertId]),
+    /project audit events are immutable/
+  );
+  await assert.rejects(
+    () => database.execute('DELETE FROM project_audit_events WHERE project_id = ?', [validProject.insertId]),
+    /project audit events are immutable/
+  );
+  const [[approvalBatchColumn]] = await database.execute(
+    `SELECT COUNT(*) AS total FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'projects' AND COLUMN_NAME = 'approval_batch'`,
+    [databaseName]
+  );
+  assert.equal(Number(approvalBatchColumn.total), 1, '013 must add projects.approval_batch');
+
   process.stdout.write(`Temporary schema verified: ${Number(tableCount.total)} tables, ${Number(columnCount.total)} columns.\n`);
   process.stdout.write('Owner invariant transaction checks passed.\n');
   process.stdout.write('Single-super and limited-administrator permission checks passed.\n');
+  process.stdout.write('Project workspace audit migration checks passed.\n');
 } finally {
   await database?.end().catch(() => undefined);
   if (admin && created) await admin.query(`DROP DATABASE \`${databaseName}\``);

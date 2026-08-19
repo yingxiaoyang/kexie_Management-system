@@ -18,6 +18,8 @@
           <el-select v-model="filters.status" placeholder="项目状态" clearable style="width: 150px">
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
+          <el-input v-model="filters.group" placeholder="组别" clearable style="width: 130px" />
+          <el-input v-model="filters.category" placeholder="项目类别" clearable style="width: 150px" />
           <el-button :loading="loading" @click="loadProjects">查询</el-button>
         </div>
         <div class="toolbar-actions">
@@ -26,17 +28,19 @@
         </div>
       </div>
 
-      <el-table v-loading="loading" :data="projects" class="desktop-table" style="width: 100%" empty-text="暂无项目数据">
+      <el-table v-loading="loading" :data="projects" class="desktop-table" style="width: 100%" empty-text="暂无项目数据" @selection-change="selectedProjects = $event">
+        <el-table-column type="selection" width="44" reserve-selection />
         <el-table-column prop="projectYear" label="年度" width="90" />
         <el-table-column prop="projectGroup" label="组别" width="130" />
         <el-table-column prop="projectCode" label="项目编号" width="150" />
         <el-table-column prop="title" label="作品名称" min-width="230" show-overflow-tooltip />
         <el-table-column prop="owners" label="负责人" width="120" />
+        <el-table-column label="团队/材料" width="130"><template #default="{ row }"><span class="muted">{{ row.memberCount || 0 }} 成员 · {{ row.submissionVersionCount || 0 }} 版</span></template></el-table-column>
         <el-table-column prop="status" label="状态" width="110">
           <template #default="{ row }"><el-tag effect="plain">{{ statusLabel(row.status) }}</el-tag></template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
-          <template #default="{ row }"><el-button text @click="openForm(row)">编辑</el-button></template>
+        <el-table-column label="操作" width="110" fixed="right">
+          <template #default="{ row }"><el-button type="primary" link @click="openWorkspace(row)">进入工作台</el-button></template>
         </el-table-column>
       </el-table>
       <div class="mobile-card-list">
@@ -50,7 +54,7 @@
             <div><span class="mobile-field-label">组别</span><span class="mobile-field-value">{{ row.projectGroup || '未分组' }}</span></div>
             <div><span class="mobile-field-label">负责人</span><span class="mobile-field-value">{{ row.owners || '未填写' }}</span></div>
           </div>
-          <div class="mobile-card-footer"><span class="muted">项目资料维护</span><el-button type="primary" plain @click="openForm(row)">编辑项目</el-button></div>
+          <div class="mobile-card-footer"><span class="muted">{{ row.submissionVersionCount || 0 }} 个材料版本</span><el-button type="primary" plain @click="openWorkspace(row)">进入工作台</el-button></div>
         </article>
       </div>
       <div class="pagination-row" v-if="pagination.total">
@@ -67,6 +71,7 @@
         <el-form-item label="项目类别"><el-input v-model.trim="form.category" /></el-form-item>
         <el-form-item label="立项日期"><el-date-picker v-model="form.approvalDate" type="date" value-format="YYYY-MM-DD" style="width: 100%" /></el-form-item>
         <el-form-item label="立项类型"><el-select v-model="form.approvalType" style="width: 100%"><el-option label="首次立项" value="first" /><el-option label="补充立项" value="supplement" /></el-select></el-form-item>
+        <el-form-item label="立项批次"><el-input v-model.trim="form.approvalBatch" placeholder="例如 2026 年首次立项" /></el-form-item>
         <el-form-item label="项目状态"><el-select v-model="form.status" style="width: 100%"><el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
         <el-form-item v-if="!form.id || !form.owners" label="项目负责人" :required="form.status !== 'draft'">
           <el-select v-model="form.ownerPersonId" clearable filterable placeholder="正式状态必须选择一名学生负责人" style="width: 100%">
@@ -103,20 +108,23 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiRequest, downloadFile } from '../../services/http'
+import { useRouter } from 'vue-router'
 
 const statusOptions = [
   { label: '草稿', value: 'draft' }, { label: '进行中', value: 'active' }, { label: '检查中', value: 'checking' },
   { label: '已结项', value: 'completed' }, { label: '已归档', value: 'archived' }, { label: '已停止', value: 'stopped' },
 ]
 const projects = ref([])
+const selectedProjects = ref([])
+const router = useRouter()
 const studentOptions = ref([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const formRef = ref()
-const filters = reactive({ keyword: '', year: '', status: '' })
+const filters = reactive({ keyword: '', year: '', status: '', group: '', category: '' })
 const pagination = reactive({ page: 1, pageSize: 20, total: 0 })
-const form = reactive({ id: null, projectYear: new Date().getFullYear(), projectGroup: '', projectCode: '', title: '', category: '', approvalDate: '', approvalType: 'first', status: 'active', ownerPersonId: null, remark: '' })
+const form = reactive({ id: null, projectYear: new Date().getFullYear(), projectGroup: '', projectCode: '', title: '', category: '', approvalDate: '', approvalType: 'first', approvalBatch: '', status: 'active', ownerPersonId: null, remark: '' })
 const rules = { projectYear: [{ required: true, message: '请选择项目年度' }], projectCode: [{ required: true, message: '请输入项目编号', trigger: 'blur' }], title: [{ required: true, message: '请输入作品名称', trigger: 'blur' }] }
 const importVisible = ref(false)
 const importFile = ref(null)
@@ -129,7 +137,8 @@ const statusLabel = (value) => statusOptions.find((item) => item.value === value
 function queryString() { const p = new URLSearchParams({ page: pagination.page, pageSize: pagination.pageSize }); Object.entries(filters).forEach(([k, v]) => v && p.set(k, v)); return p }
 async function loadProjects() { loading.value = true; try { const response = await apiRequest(`/projects?${queryString()}`); projects.value = response.data; Object.assign(pagination, response.pagination) } catch (e) { ElMessage.error(e.message) } finally { loading.value = false } }
 async function loadStudents() { try { const response = await apiRequest('/people?personType=student&pageSize=100'); studentOptions.value = response.data } catch (e) { ElMessage.error(e.message) } }
-function openForm(row) { Object.assign(form, row ? { ...row, id: row.id, ownerPersonId: null, approvalDate: row.approvalDate?.slice?.(0, 10) || row.approvalDate || '' } : { id: null, projectYear: new Date().getFullYear(), projectGroup: '', projectCode: '', title: '', category: '', approvalDate: '', approvalType: 'first', status: 'active', ownerPersonId: null, remark: '' }); if ((!row || !row.owners) && !studentOptions.value.length) loadStudents(); dialogVisible.value = true }
+function openForm(row) { Object.assign(form, row ? { ...row, id: row.id, ownerPersonId: null, approvalDate: row.approvalDate?.slice?.(0, 10) || row.approvalDate || '' } : { id: null, projectYear: new Date().getFullYear(), projectGroup: '', projectCode: '', title: '', category: '', approvalDate: '', approvalType: 'first', approvalBatch: '', status: 'active', ownerPersonId: null, remark: '' }); if ((!row || !row.owners) && !studentOptions.value.length) loadStudents(); dialogVisible.value = true }
+function openWorkspace(row) { router.push(`/admin/projects/${row.id}`) }
 async function saveProject() { if (!(await formRef.value?.validate().catch(() => false))) return; if ((!form.id || !form.owners) && form.status !== 'draft' && !form.ownerPersonId) { ElMessage.warning('正式状态项目必须选择一名负责人'); return } saving.value = true; try { await apiRequest(form.id ? `/projects/${form.id}` : '/projects', { method: form.id ? 'PUT' : 'POST', body: form }); ElMessage.success('项目已保存'); dialogVisible.value = false; await loadProjects() } catch (e) { ElMessage.error(e.message) } finally { saving.value = false } }
 function selectImportFile(file) { importFile.value = file.raw; importResult.value = null }
 function removeImportFile() { importFile.value = null; importResult.value = null }
