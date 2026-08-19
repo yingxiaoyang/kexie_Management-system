@@ -5,6 +5,7 @@ import {
   processNextReportExport,
   validateAndEnqueueReportExport
 } from '../src/services/reportExportService.js';
+import { normalizeReportDesignConfig } from '../src/utils/reportDesign.js';
 
 function unique(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -109,7 +110,7 @@ async function main() {
       { row: 2, col: 1, value: '负责人', style: { bold: true, border: true } },
       { row: 2, col: 2, fieldKey: 'owner.name', style: { border: true } },
       { row: 3, col: 1, value: '成员汇总', style: { bold: true, border: true } },
-      { row: 3, col: 2, fieldKey: 'members.name', fieldMode: 'summary', itemTemplate: '{姓名}（{学号}）', itemSeparator: '；', style: { border: true } },
+      { row: 3, col: 2, fieldKey: 'members.name', fieldMode: 'summary', itemTemplate: '{项目成员.姓名}（{项目成员.学号}）', itemSeparator: '；', style: { border: true } },
       { row: 3, col: 3, value: '成员换行', style: { bold: true, border: true } },
       { row: 3, col: 4, fieldKey: 'members.name', fieldMode: 'lines', style: { border: true, wrap: true } },
       { row: 4, col: 1, value: '重复成员', style: { bold: true, fill: 'F3F6FA', border: true } },
@@ -176,6 +177,11 @@ async function main() {
       [JSON.stringify(designConfig), admin.id]
     );
     designId = designInsert.insertId;
+    const [[storedDesign]] = await pool.execute('SELECT design_config AS designConfig FROM report_designs WHERE id = ?', [designId]);
+    const reopenedDesign = normalizeReportDesignConfig(storedDesign.designConfig);
+    if (reopenedDesign.cells.find((cell) => cell.row === 3 && cell.col === 2)?.itemTemplate !== '{项目成员.姓名}（{项目成员.学号}）') {
+      throw new Error('Saved report design did not reopen with canonical source-qualified tokens');
+    }
 
     const continuous = await validateAndEnqueueReportExport({
       userId: admin.id,

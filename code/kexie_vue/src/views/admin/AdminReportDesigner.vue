@@ -18,6 +18,18 @@
       </div>
     </section>
 
+    <el-alert
+      v-if="designValidationIssues.length"
+      class="section"
+      type="error"
+      :closable="false"
+      title="当前方案存在待修复字段，动态预览、保存和导出已暂停"
+    >
+      <template #default>
+        <ul class="report-validation-list"><li v-for="issue in designValidationIssues" :key="issue">{{ issue }}</li></ul>
+      </template>
+    </el-alert>
+
     <section class="report-mobile-export panel section">
       <div class="panel-body">
         <div class="panel-heading">
@@ -44,16 +56,25 @@
                 <div class="report-field-groups">
                   <div v-for="group in filteredFieldGroups" :key="group.key" class="report-field-group">
                     <p>{{ group.label }}</p>
-                    <button
-                      v-for="field in group.fields"
-                      :key="field.key"
-                      class="report-field-pill"
-                      draggable="true"
-                      @click="applyField(field.key)"
-                      @dragstart="onFieldDrag(field.key, $event)"
-                    >
-                      {{ field.label }}
-                    </button>
+                    <div v-for="field in group.fields" :key="field.key" class="report-field-row">
+                      <button
+                        class="report-field-pill"
+                        draggable="true"
+                        :title="`${field.token}｜字段 key：${field.key}`"
+                        @click="applyField(field.key)"
+                        @dragstart="onFieldDrag(field.key, $event)"
+                      >
+                        {{ field.displayLabel }}
+                      </button>
+                      <button
+                        class="report-template-insert"
+                        type="button"
+                        :disabled="!isCollectionCell"
+                        :title="isCollectionCell ? `在光标处插入 ${field.token}` : '先选择使用单格汇总或单格换行的集合字段单元格'"
+                        @click="insertTemplateField(field)"
+                      >模板+
+                      </button>
+                    </div>
                   </div>
                 </div>
               </el-tab-pane>
@@ -131,7 +152,7 @@
                     @dragover.prevent
                     @drop="dropField(row, col, $event)"
                   >
-                    <span>{{ displayCell(row, col) }}</span>
+                    <span :title="cellTooltip(row, col)">{{ displayCell(row, col) }}</span>
                   </td>
                 </tr>
               </tbody>
@@ -148,8 +169,16 @@
               <el-form-item label="多条数据"><el-select v-model="currentCell.fieldMode" style="width: 100%" @change="setCellMode"><el-option label="单项/区域逐行" value="single" /><el-option label="单格汇总" value="summary" /><el-option label="单格换行" value="lines" /></el-select></el-form-item>
               <template v-if="isCollectionCell">
                 <el-form-item label="条目模板">
-                  <el-input v-model="currentCell.itemTemplate" placeholder="例如：{姓名}（{学号}）" @input="setCellCollectionOption('itemTemplate', currentCell.itemTemplate)" />
-                  <p class="table-note">可用占位：{{ collectionTemplateHint }}</p>
+                  <el-input
+                    ref="itemTemplateInput"
+                    v-model="currentCell.itemTemplate"
+                    placeholder="例如：{项目成员.姓名}（{项目成员.学号}）"
+                    @input="setCellCollectionOption('itemTemplate', currentCell.itemTemplate)"
+                    @dragover.prevent
+                    @drop.stop.prevent="dropFieldInTemplate"
+                  />
+                  <p class="table-note">可从左侧拖入，或用“模板+”按钮在光标处插入。可用占位：{{ collectionTemplateHint }}</p>
+                  <p v-if="currentTemplateIssues.length" class="report-template-error">{{ currentTemplateIssues[0] }}</p>
                 </el-form-item>
                 <el-form-item label="条目间隔">
                   <el-select v-model="currentCell.itemSeparator" allow-create filterable clearable style="width: 100%" @change="setCellCollectionOption('itemSeparator', currentCell.itemSeparator)">
@@ -169,7 +198,7 @@
             <el-divider />
             <h3 class="panel-title">重复区域</h3>
             <el-form label-width="78px" class="report-property-form">
-              <el-form-item label="区域类型"><el-select v-model="repeatForm.type" style="width: 100%"><el-option label="项目成员" value="members" /><el-option label="指导老师" value="advisors" /><el-option label="检查记录" value="checks" /><el-option label="材料信息" value="materials" /></el-select></el-form-item>
+              <el-form-item label="区域类型"><el-select v-model="repeatForm.type" style="width: 100%"><el-option label="项目成员" value="members" /><el-option label="指导教师" value="advisors" /><el-option label="检查记录" value="checks" /><el-option label="材料信息" value="materials" /></el-select></el-form-item>
               <el-form-item label="空数据"><el-select v-model="repeatForm.emptyMode" style="width: 100%"><el-option label="保留空白" value="keepBlank" /><el-option label="显示无" value="noneText" /><el-option label="不生成行" value="blank" /></el-select></el-form-item>
               <el-button style="width: 100%" @click="setRepeatRegion">将当前选区设为重复区域</el-button>
             </el-form>
@@ -247,7 +276,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { apiRequest, downloadFile } from '../../services/http'
 
@@ -260,6 +289,7 @@ const fieldGroups = ref([])
 const fieldKeyword = ref('')
 const previewRows = ref([])
 const previewProjectId = ref(null)
+const itemTemplateInput = ref(null)
 const undoStack = ref([])
 const redoStack = ref([])
 const dragSelecting = ref(false)
@@ -301,12 +331,9 @@ const currentCell = computed(() => getCell(selected.endRow, selected.endCol, tru
 const collectionGroups = new Set(['members', 'advisors', 'checks', 'materials'])
 const selectedFieldGroup = computed(() => String(currentCell.value.fieldKey || '').split('.')[0])
 const isCollectionCell = computed(() => collectionGroups.has(selectedFieldGroup.value) && ['summary', 'lines'].includes(currentCell.value.fieldMode))
-const collectionTemplateHint = computed(() => ({
-  members: '{姓名} {学院} {学号} {电话} {QQ}',
-  advisors: '{姓名} {工号} {单位} {联系方式} {职称} {邮箱}',
-  checks: '{阶段} {日志数量} {评级} {检查时间}',
-  materials: '{任务} {材料类别} {提交状态} {审核状态} {最后提交时间}',
-}[selectedFieldGroup.value] || ''))
+const collectionTemplateHint = computed(() => allFields.value.filter((field) => field.groupKey === selectedFieldGroup.value).map((field) => field.token).join(' '))
+const designValidationIssues = computed(() => validateDesignConfig(config))
+const currentTemplateIssues = computed(() => validateCellTemplate(currentCell.value))
 const selectedStyle = reactive({ bold: false, wrap: true, border: true, fontSize: 11, color: '', fill: '', align: 'left' })
 const styleColor = ref('#172033')
 const styleFill = ref('#FFFFFF')
@@ -315,7 +342,7 @@ const selectedColumnWidth = ref(14)
 const filteredExportProjects = computed(() => options.projects.filter((item) => (!exportForm.years.length || exportForm.years.includes(Number(item.projectYear))) && (!exportForm.groups.length || exportForm.groups.includes(item.projectGroup))))
 
 function emptyConfig() {
-  return { version: 1, sheet: { rowCount: 14, columnCount: 8, rows: [], columns: [] }, cells: [], merges: [], repeatRegions: [], export: { layout: 'continuous', gapRows: 1, sheetNameRule: '{项目编号}-{作品名称}' } }
+  return { version: 2, sheet: { rowCount: 14, columnCount: 8, rows: [], columns: [] }, cells: [], merges: [], repeatRegions: [], export: { layout: 'continuous', gapRows: 1, sheetNameRule: '{项目编号}-{作品名称}' } }
 }
 
 function newExportForm() {
@@ -372,9 +399,96 @@ function displayCell(row, col) {
   const cell = getCell(row, col)
   if (cell.fieldKey) {
     const field = allFields.value.find((item) => item.key === cell.fieldKey)
-    return `{${field?.label || cell.fieldKey}}`
+    return field?.token || `{无效字段:${cell.fieldKey}}`
   }
   return cell.value || ''
+}
+
+function cellTooltip(row, col) {
+  const cell = getCell(row, col)
+  if (!cell.fieldKey) return cell.value || ''
+  const field = allFields.value.find((item) => item.key === cell.fieldKey)
+  return field ? `${field.token}｜字段 key：${field.key}` : `无效字段 key：${cell.fieldKey}`
+}
+
+function groupLabel(groupKey) {
+  return fieldGroups.value.find((group) => group.key === groupKey)?.label || groupKey
+}
+
+function validateCellTemplate(cell) {
+  const template = String(cell?.itemTemplate || '')
+  if (!template || !allFields.value.length) return []
+  const location = `第 ${cell.row} 行第 ${cell.col} 列`
+  const issues = []
+  const contextField = allFields.value.find((field) => field.key === cell.fieldKey)
+  if (!['summary', 'lines'].includes(cell.fieldMode)) issues.push(`${location}只有“单格汇总/单格换行”模式可以使用条目模板`)
+  if (!contextField || !collectionGroups.has(contextField.groupKey)) issues.push(`${location}的条目模板缺少可确定的集合字段上下文`)
+  const tokenPattern = /\{([^{}]+)\}/g
+  if (/[{}]/.test(template.replace(tokenPattern, ''))) issues.push(`${location}的条目模板存在未闭合或嵌套的占位符`)
+  for (const match of template.matchAll(tokenPattern)) {
+    const tokenName = String(match[1] || '').trim()
+    let field = allFields.value.find((candidate) => candidate.displayLabel === tokenName || candidate.key === tokenName)
+    if (!field && contextField) {
+      field = allFields.value.find((candidate) => candidate.groupKey === contextField.groupKey && (candidate.label === tokenName || candidate.key.split('.')[1] === tokenName))
+    }
+    if (!field) {
+      const sameLabels = allFields.value.filter((candidate) => candidate.label === tokenName)
+      issues.push(!tokenName.includes('.') && sameLabels.length > 1
+        ? `${location}的旧占位符 {${tokenName}} 无法确定来源，待修复后才能保存或导出`
+        : `${location}包含无效占位符 ${match[0]}，请从字段库重新插入`)
+    } else if (contextField && field.groupKey !== contextField.groupKey) {
+      issues.push(`${location}的条目模板属于“${contextField.groupLabel}”，不能混用 ${field.token}`)
+    }
+  }
+  return [...new Set(issues)]
+}
+
+function validateDesignConfig(targetConfig) {
+  if (!allFields.value.length) return targetConfig.validationIssues || []
+  const issues = []
+  for (const cell of targetConfig.cells || []) {
+    const field = allFields.value.find((candidate) => candidate.key === cell.fieldKey)
+    if (cell.fieldKey && !field) {
+      issues.push(`第 ${cell.row} 行第 ${cell.col} 列使用了无效字段 key“${cell.fieldKey}”`)
+      continue
+    }
+    if (field) {
+      const region = (targetConfig.repeatRegions || []).find((item) => cell.row >= item.startRow && cell.row <= item.endRow)
+      if (collectionGroups.has(field.groupKey)) {
+        if (region && region.type !== field.groupKey) issues.push(`第 ${cell.row} 行第 ${cell.col} 列位于“${groupLabel(region.type)}”重复区域，不能使用 ${field.token}`)
+        if (region && ['summary', 'lines'].includes(cell.fieldMode)) issues.push(`第 ${cell.row} 行第 ${cell.col} 列位于重复区域内，${field.token} 必须使用“单项/区域逐行”模式`)
+        if (!region && cell.fieldMode === 'single') issues.push(`第 ${cell.row} 行第 ${cell.col} 列的 ${field.token} 使用“单项/区域逐行”模式，但不在对应重复区域内`)
+      } else if (['summary', 'lines'].includes(cell.fieldMode)) {
+        issues.push(`第 ${cell.row} 行第 ${cell.col} 列的非集合字段 ${field.token} 不能使用多条数据模式`)
+      }
+    }
+    issues.push(...validateCellTemplate(cell))
+  }
+  return [...new Set(issues)]
+}
+
+function canonicalizeDesignTokens(targetConfig) {
+  if (!allFields.value.length) return
+  for (const cell of targetConfig.cells || []) {
+    if (!cell.itemTemplate) continue
+    const contextField = allFields.value.find((field) => field.key === cell.fieldKey)
+    cell.itemTemplate = String(cell.itemTemplate).replace(/\{([^{}]+)\}/g, (match, rawName) => {
+      const tokenName = String(rawName || '').trim()
+      let field = allFields.value.find((candidate) => candidate.displayLabel === tokenName || candidate.key === tokenName)
+      if (!field && contextField) {
+        field = allFields.value.find((candidate) => candidate.groupKey === contextField.groupKey && (candidate.label === tokenName || candidate.key.split('.')[1] === tokenName))
+      }
+      return field?.token || match
+    })
+  }
+}
+
+function ensureDesignValid(targetConfig, action) {
+  canonicalizeDesignTokens(targetConfig)
+  const issues = validateDesignConfig(targetConfig)
+  if (!issues.length) return true
+  ElMessage.error(`无法${action}：${issues[0]}`)
+  return false
 }
 
 function selectedMerge(row, col) {
@@ -468,11 +582,40 @@ function applyField(fieldKey) {
 }
 
 function onFieldDrag(fieldKey, event) {
+  event.dataTransfer?.setData('application/x-report-field', fieldKey)
   event.dataTransfer?.setData('text/plain', fieldKey)
 }
 
+function templateInputElement() {
+  return itemTemplateInput.value?.input || itemTemplateInput.value?.textarea || itemTemplateInput.value?.$el?.querySelector('input, textarea')
+}
+
+function insertTemplateField(field, targetElement = templateInputElement()) {
+  if (!isCollectionCell.value) {
+    ElMessage.warning('请先选择集合字段，并把“多条数据”设为单格汇总或单格换行')
+    return
+  }
+  const text = String(currentCell.value.itemTemplate || '')
+  const start = Number.isInteger(targetElement?.selectionStart) ? targetElement.selectionStart : text.length
+  const end = Number.isInteger(targetElement?.selectionEnd) ? targetElement.selectionEnd : start
+  pushHistory()
+  currentCell.value.itemTemplate = `${text.slice(0, start)}${field.token}${text.slice(end)}`
+  nextTick(() => {
+    const input = templateInputElement()
+    input?.focus()
+    input?.setSelectionRange?.(start + field.token.length, start + field.token.length)
+  })
+}
+
+function dropFieldInTemplate(event) {
+  const fieldKey = event.dataTransfer?.getData('application/x-report-field') || event.dataTransfer?.getData('text/plain')
+  const field = allFields.value.find((candidate) => candidate.key === fieldKey)
+  if (!field) return ElMessage.error('拖入的报表字段无效，请从字段库重新选择')
+  insertTemplateField(field, event.target)
+}
+
 function dropField(row, col, event) {
-  const fieldKey = event.dataTransfer?.getData('text/plain')
+  const fieldKey = event.dataTransfer?.getData('application/x-report-field') || event.dataTransfer?.getData('text/plain')
   if (!fieldKey) return
   startSelect(row, col)
   pushHistory()
@@ -625,10 +768,12 @@ function loadDesign(item) {
   designId.value = item.id
   designName.value = item.designName
   replaceConfig(item.designConfig)
-  ElMessage.success('已载入方案')
+  if (validateDesignConfig(item.designConfig).length) ElMessage.warning('方案已载入，但包含待修复字段；修复前不能预览、保存或导出')
+  else ElMessage.success('已载入方案')
 }
 
 async function saveDesign() {
+  if (!ensureDesignValid(config, '保存方案')) return
   try {
     const body = { designName: designName.value, designConfig: config, status: 'enabled' }
     if (designId.value) await apiRequest(`/report-designs/${designId.value}`, { method: 'PUT', body })
@@ -644,6 +789,7 @@ async function saveDesign() {
 }
 
 async function requestPreview() {
+  if (!ensureDesignValid(config, '动态预览')) return
   try {
     const response = await apiRequest('/report-designs/preview', { method: 'POST', body: { designConfig: config, scope: { projectIds: previewProjectId.value ? [previewProjectId.value] : [] } } })
     previewRows.value = response.data.rows
@@ -677,6 +823,10 @@ async function openExportDialog() {
 async function createExport() {
   if (exportForm.source === 'saved' && !exportForm.reportDesignId) return ElMessage.warning('请选择已保存方案')
   if (!exportForm.years.length && !exportForm.groups.length && !exportForm.projectIds.length) return ElMessage.warning('请至少选择年度、组别或指定项目中的一种范围')
+  const exportConfig = exportForm.source === 'current'
+    ? config
+    : designs.value.find((item) => Number(item.id) === Number(exportForm.reportDesignId))?.designConfig
+  if (exportConfig && !ensureDesignValid(exportConfig, '发起导出')) return
   exporting.value = true
   try {
     await apiRequest('/report-designs/exports', {
@@ -735,7 +885,7 @@ function startPolling() {
   }, 3000)
 }
 
-const repeatLabel = (value) => ({ members: '成员', advisors: '指导老师', checks: '检查记录', materials: '材料' }[value] || value)
+const repeatLabel = (value) => ({ members: '项目成员', advisors: '指导教师', checks: '检查记录', materials: '材料信息' }[value] || value)
 const statusLabel = (value) => ({ queued: '排队中', processing: '生成中', success: '成功', failed: '失败' }[value] || value)
 const statusType = (value) => ({ queued: 'info', processing: 'warning', success: 'success', failed: 'danger' }[value] || 'info')
 const reportBatch = (row) => `RPT-${String(row.id).padStart(6, '0')}`

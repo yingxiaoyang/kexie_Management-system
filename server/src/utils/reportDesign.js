@@ -43,7 +43,7 @@ export const REPORT_FIELD_GROUPS = [
   },
   {
     key: 'advisors',
-    label: '指导老师',
+    label: '指导教师',
     fields: [
       ['advisors.name', '姓名'],
       ['advisors.teacherNo', '工号'],
@@ -87,17 +87,26 @@ export const REPORT_FIELD_GROUPS = [
 ];
 
 export const REPORT_FIELDS = REPORT_FIELD_GROUPS.flatMap((group) => (
-  group.fields.map(([key, label]) => ({ key, label, group: group.key, groupLabel: group.label }))
+  group.fields.map(([key, label]) => ({
+    key,
+    label,
+    group: group.key,
+    groupLabel: group.label,
+    displayLabel: `${group.label}.${label}`,
+    token: `{${group.label}.${label}}`
+  }))
 ));
 
 const reportFieldKeys = new Set(REPORT_FIELDS.map((field) => field.key));
+const reportFieldsByKey = new Map(REPORT_FIELDS.map((field) => [field.key, field]));
+const reportFieldsByTokenName = new Map(REPORT_FIELDS.map((field) => [field.displayLabel, field]));
 const repeatTypes = new Set(['members', 'advisors', 'checks', 'materials']);
 const emptyModes = new Set(['blank', 'noneText', 'keepBlank']);
 const alignments = new Set(['left', 'center', 'right']);
 const verticalAlignments = new Set(['top', 'middle', 'bottom']);
 
 export const DEFAULT_REPORT_CONFIG = {
-  version: 1,
+  version: 2,
   sheet: {
     rowCount: 14,
     columnCount: 8,
@@ -184,14 +193,14 @@ function normalizeColumns(columns = [], columnCount) {
   }));
 }
 
-function normalizeCells(cells = [], rowCount, columnCount) {
+function normalizeCells(cells = [], rowCount, columnCount, issues = []) {
   if (!Array.isArray(cells)) return [];
   return cells.map((cell) => {
     const row = positiveInteger(cell.row, 1, { min: 1, max: rowCount });
     const col = positiveInteger(cell.col, 1, { min: 1, max: columnCount });
     const fieldKey = String(cell.fieldKey || '').trim();
     if (fieldKey && !reportFieldKeys.has(fieldKey)) {
-      throw badRequest(`Unsupported report field: ${fieldKey}`, 'VALIDATION_ERROR');
+      issues.push(`第 ${row} 行第 ${col} 列使用了无效字段 key“${fieldKey}”，请重新选择字段`);
     }
     const fieldMode = ['single', 'summary', 'lines'].includes(cell.fieldMode) ? cell.fieldMode : 'single';
     const value = String(cell.value || '').slice(0, 1000);
@@ -207,6 +216,86 @@ function normalizeCells(cells = [], rowCount, columnCount) {
       style: cleanCellStyle(cell.style)
     };
   }).filter((cell) => cell.value || cell.fieldKey || Object.keys(cell.style || {}).length);
+}
+
+function cellLocation(cell) {
+  return `第 ${cell.row} 行第 ${cell.col} 列`;
+}
+
+function fieldNameFromKey(fieldKey) {
+  return String(fieldKey || '').split('.')[1] || '';
+}
+
+function normalizeItemTemplate(cell, issues) {
+  const template = String(cell.itemTemplate || '');
+  if (!template) return '';
+  if (!['summary', 'lines'].includes(cell.fieldMode)) {
+    issues.push(`${cellLocation(cell)}只有“单格汇总/单格换行”模式可以使用条目模板`);
+  }
+  const contextField = reportFieldsByKey.get(cell.fieldKey);
+  const contextGroup = contextField?.group;
+  if (!contextGroup || !repeatTypes.has(contextGroup)) {
+    issues.push(`${cellLocation(cell)}的条目模板缺少可确定的集合字段上下文，请先绑定项目成员、指导教师、检查记录或材料信息字段`);
+  }
+
+  const tokenPattern = /\{([^{}]+)\}/g;
+  const residue = template.replace(tokenPattern, '');
+  if (/[{}]/.test(residue)) {
+    issues.push(`${cellLocation(cell)}的条目模板存在未闭合或嵌套的占位符，请使用“{来源.字段}”格式`);
+  }
+
+  return template.replace(tokenPattern, (match, rawName) => {
+    const tokenName = String(rawName || '').trim();
+    let field = reportFieldsByTokenName.get(tokenName) || reportFieldsByKey.get(tokenName);
+    if (!field && contextGroup) {
+      field = REPORT_FIELDS.find((candidate) => (
+        candidate.group === contextGroup
+        && (candidate.label === tokenName || fieldNameFromKey(candidate.key) === tokenName)
+      ));
+    }
+
+    if (!field) {
+      const labelMatches = REPORT_FIELDS.filter((candidate) => candidate.label === tokenName);
+      if (!tokenName.includes('.') && labelMatches.length > 1) {
+        issues.push(`${cellLocation(cell)}的旧占位符 {${tokenName}} 无法确定来源，已标记为待修复；请改用“{来源.${tokenName}}”`);
+      } else {
+        issues.push(`${cellLocation(cell)}包含无效占位符 ${match}，请从字段库插入有效字段`);
+      }
+      return match;
+    }
+
+    if (contextGroup && field.group !== contextGroup) {
+      const contextLabel = REPORT_FIELD_GROUPS.find((group) => group.key === contextGroup)?.label || contextGroup;
+      issues.push(`${cellLocation(cell)}的条目模板属于“${contextLabel}”，不能混用 ${field.token}`);
+    }
+    return field.token;
+  });
+}
+
+function validateReportCells(config, issues) {
+  for (const cell of config.cells) {
+    const field = reportFieldsByKey.get(cell.fieldKey);
+    if (!field) {
+      cell.itemTemplate = normalizeItemTemplate(cell, issues);
+      continue;
+    }
+    const region = config.repeatRegions.find((item) => cell.row >= item.startRow && cell.row <= item.endRow);
+    if (repeatTypes.has(field.group)) {
+      if (region && region.type !== field.group) {
+        const regionLabel = REPORT_FIELD_GROUPS.find((group) => group.key === region.type)?.label || region.type;
+        issues.push(`${cellLocation(cell)}位于“${regionLabel}”重复区域，不能使用 ${field.token}`);
+      }
+      if (region && ['summary', 'lines'].includes(cell.fieldMode)) {
+        issues.push(`${cellLocation(cell)}位于重复区域内，集合字段 ${field.token} 必须使用“单项/区域逐行”模式`);
+      }
+      if (!region && cell.fieldMode === 'single') {
+        issues.push(`${cellLocation(cell)}的集合字段 ${field.token} 使用“单项/区域逐行”模式，但不在对应重复区域内`);
+      }
+    } else if (['summary', 'lines'].includes(cell.fieldMode)) {
+      issues.push(`${cellLocation(cell)}的非集合字段 ${field.token} 不能使用多条数据模式`);
+    }
+    cell.itemTemplate = normalizeItemTemplate(cell, issues);
+  }
 }
 
 function normalizeMerges(merges = [], rowCount, columnCount) {
@@ -244,7 +333,7 @@ function normalizeRepeatRegions(regions = [], rowCount) {
   return normalized;
 }
 
-export function normalizeReportDesignConfig(input) {
+export function normalizeReportDesignConfig(input, { allowInvalid = false } = {}) {
   let raw = input;
   if (typeof raw === 'string') {
     try { raw = JSON.parse(raw); } catch { throw badRequest('designConfig must be valid JSON', 'VALIDATION_ERROR'); }
@@ -255,19 +344,27 @@ export function normalizeReportDesignConfig(input) {
   const layout = raw.export?.layout === 'sheets' ? 'sheets' : 'continuous';
   const gapRows = positiveInteger(raw.export?.gapRows, 1, { min: 0, max: 20 });
   const sheetNameRule = String(raw.export?.sheetNameRule || '{项目编号}-{作品名称}').slice(0, 120);
-  return {
-    version: 1,
+  const issues = [];
+  const config = {
+    version: 2,
     sheet: {
       rowCount,
       columnCount,
       rows: normalizeRows(raw.sheet?.rows, rowCount),
       columns: normalizeColumns(raw.sheet?.columns, columnCount)
     },
-    cells: normalizeCells(raw.cells, rowCount, columnCount),
+    cells: normalizeCells(raw.cells, rowCount, columnCount, issues),
     merges: normalizeMerges(raw.merges, rowCount, columnCount),
     repeatRegions: normalizeRepeatRegions(raw.repeatRegions, rowCount),
     export: { layout, gapRows, sheetNameRule }
   };
+  validateReportCells(config, issues);
+  const validationIssues = [...new Set(issues)];
+  if (validationIssues.length && !allowInvalid) {
+    throw badRequest(`报表设计存在以下问题：\n${validationIssues.map((issue) => `- ${issue}`).join('\n')}`, 'REPORT_DESIGN_INVALID');
+  }
+  if (validationIssues.length) config.validationIssues = validationIssues;
+  return config;
 }
 
 export function formatDateText(value, fallback = '') {
@@ -388,43 +485,12 @@ function valueForField(project, fieldKey, repeatContext = {}) {
   return value ?? '';
 }
 
-const collectionTemplateLabels = {
-  members: {
-    name: '姓名',
-    college: '学院',
-    studentNo: '学号',
-    phone: '电话',
-    qq: 'QQ'
-  },
-  advisors: {
-    name: '姓名',
-    teacherNo: '工号',
-    unit: '单位',
-    phone: '联系方式',
-    title: '职称',
-    email: '邮箱'
-  },
-  checks: {
-    phase: '阶段',
-    researchLogCount: '日志数量',
-    rating: '评级',
-    checkedAt: '检查时间'
-  },
-  materials: {
-    taskName: '任务',
-    categoryName: '材料类别',
-    submissionStatus: '提交状态',
-    reviewStatus: '审核状态',
-    lastSubmittedAt: '最后提交时间'
-  }
-};
-
 function renderCollectionItem(group, item, fieldName, template) {
   if (!template) return item[fieldName] ?? '';
-  const labels = collectionTemplateLabels[group] || {};
-  return String(template).replace(/\{([^{}]+)\}/g, (_match, key) => {
-    const fieldKey = Object.entries(labels).find(([, label]) => label === key)?.[0] || key;
-    return item[fieldKey] ?? '';
+  return String(template).replace(/\{([^{}]+)\}/g, (_match, tokenName) => {
+    const field = reportFieldsByTokenName.get(String(tokenName || '').trim());
+    if (!field || field.group !== group) return '';
+    return item[fieldNameFromKey(field.key)] ?? '';
   });
 }
 

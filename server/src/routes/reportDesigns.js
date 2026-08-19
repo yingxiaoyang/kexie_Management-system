@@ -9,6 +9,7 @@ import { success } from '../utils/response.js';
 import { resolveDownloadFile } from '../utils/safeFiles.js';
 import {
   DEFAULT_REPORT_CONFIG,
+  REPORT_FIELDS,
   REPORT_FIELD_GROUPS,
   normalizeReportDesignConfig,
   reportPreviewGrid
@@ -38,7 +39,7 @@ function designPayload(body) {
 function mapDesign(row) {
   return {
     ...row,
-    designConfig: normalizeReportDesignConfig(row.designConfig)
+    designConfig: normalizeReportDesignConfig(row.designConfig, { allowInvalid: true })
   };
 }
 
@@ -49,7 +50,7 @@ function mapExport(row) {
     exportScope,
     exportScopeLabel: reportScopeLabel(exportScope),
     exportSummary: parseJson(row.exportSummary, null),
-    designSnapshot: row.designSnapshot ? normalizeReportDesignConfig(row.designSnapshot) : null,
+    designSnapshot: row.designSnapshot ? normalizeReportDesignConfig(row.designSnapshot, { allowInvalid: true }) : null,
     downloadable: row.exportStatus === 'success' && Boolean(row.exportFilePath) && !row.fileCleanupAt
   };
 }
@@ -58,8 +59,11 @@ router.use(requireAuth, requireRole('admin'), requireAdminPermission('report_man
 
 router.get('/fields', (_req, res) => {
   success(res, REPORT_FIELD_GROUPS.map((group) => ({
-    ...group,
-    fields: group.fields.map(([key, label]) => ({ key, label }))
+    key: group.key,
+    label: group.label,
+    fields: REPORT_FIELDS.filter((field) => field.group === group.key).map(({ key, label, displayLabel, token }) => ({
+      key, label, displayLabel, token
+    }))
   })));
 });
 

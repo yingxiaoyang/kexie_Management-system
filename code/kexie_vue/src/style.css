@@ -1518,7 +1518,8 @@ a {
 
 .report-field-pill {
   display: inline-flex;
-  margin: 0 6px 6px 0;
+  flex: 1;
+  min-width: 0;
   padding: 6px 9px;
   border: 1px solid #c9d7ea;
   border-radius: 6px;
@@ -1526,6 +1527,34 @@ a {
   color: #26364f;
   font-size: 12px;
   cursor: grab;
+}
+
+.report-field-row {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.report-template-insert {
+  flex: 0 0 auto;
+  padding: 5px 7px;
+  border: 1px solid #c9d7ea;
+  border-radius: 6px;
+  background: #f4f7fb;
+  color: #35506f;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.report-template-insert:hover:not(:disabled) {
+  border-color: #93b4ec;
+  background: #edf4ff;
+  color: #1d4ed8;
+}
+
+.report-template-insert:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .report-field-pill:hover {
@@ -1628,6 +1657,19 @@ a {
 
 .report-property-form {
   margin-top: 12px;
+}
+
+.report-validation-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.report-template-error {
+  width: 100%;
+  margin: 6px 0 0;
+  color: #c0362c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .report-preview-grid {
